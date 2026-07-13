@@ -1,0 +1,10 @@
+{
+  "name": "3ds-granulator-standalone-patcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-standalone.mjs",
+    "test": "node scripts/build-standalone.mjs && node --test tests/*.test.mjs"
+  }
+}

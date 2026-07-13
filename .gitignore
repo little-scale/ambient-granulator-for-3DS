@@ -1,0 +1,8 @@
+build/
+dist/
+*.3dsx
+*.elf
+*.map
+*.smdh
+.DS_Store
+dspfirm.cdc
