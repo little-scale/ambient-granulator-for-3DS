@@ -11,6 +11,7 @@
 
 static int16_t sample[TEST_SAMPLE_COUNT];
 static int16_t output[TEST_OUTPUT_FRAMES * 2];
+static int32_t wide_output[TEST_OUTPUT_FRAMES * 2];
 
 static GranularConfig default_config(void)
 {
@@ -207,29 +208,72 @@ static void test_polyphony_limit(void)
     assert(granular_engine_active_voices(&engine) == 4);
 }
 
+static void test_wide_mix_preserves_overload_headroom(void)
+{
+    GranularEngine narrow;
+    GranularEngine wide;
+    GranularConfig config = default_config();
+    config.grain_count = GRANULAR_VOICE_COUNT;
+    config.interval_ms = 1;
+    config.length_ms = 500;
+    config.attack_percent = 0;
+    config.release_percent = 0;
+    reset_engine(&narrow);
+    reset_engine(&wide);
+    granular_engine_trigger(&narrow, 160, config.grain_count);
+    granular_engine_trigger(&wide, 160, config.grain_count);
+
+    granular_engine_render(&narrow, output, 1000, &config);
+    granular_engine_render_wide(&wide, wide_output, 1000, &config);
+    assert(memcmp(&narrow, &wide, sizeof(narrow)) == 0);
+
+    bool narrow_clipped = false;
+    bool wide_exceeded_pcm16 = false;
+    for (int frame = 0; frame < 1000; frame++) {
+        narrow_clipped |= output[frame * 2] == 32767
+                       || output[frame * 2 + 1] == 32767;
+        wide_exceeded_pcm16 |= wide_output[frame * 2] > 32767
+                           || wide_output[frame * 2 + 1] > 32767;
+    }
+    assert(narrow_clipped);
+    assert(wide_exceeded_pcm16);
+}
+
 static void test_silent_render_preserves_engine_timing(void)
 {
     GranularEngine audible;
     GranularEngine silent;
+    GranularEngine silent_wide;
     GranularConfig config = default_config();
     int16_t silent_output[2048 * 2];
+    int32_t silent_wide_output[2048 * 2];
     config.pitch_semitones = -12;
     config.length_ms = 500;
     config.grain_count = 16;
     config.interval_ms = 1;
     reset_engine(&audible);
     reset_engine(&silent);
+    reset_engine(&silent_wide);
     granular_engine_trigger(&audible, 160, config.grain_count);
     granular_engine_trigger(&silent, 160, config.grain_count);
+    granular_engine_trigger(&silent_wide, 160, config.grain_count);
 
     granular_engine_render(&audible, output, 2048, &config);
     memset(silent_output, 0x7f, sizeof(silent_output));
     granular_engine_render_silent(&silent, silent_output, 2048, &config);
+    memset(silent_wide_output, 0x7f, sizeof(silent_wide_output));
+    granular_engine_render_silent_wide(&silent_wide, silent_wide_output,
+                                       2048, &config);
 
     assert(memcmp(&audible, &silent, sizeof(audible)) == 0);
+    assert(memcmp(&audible, &silent_wide, sizeof(audible)) == 0);
     for (size_t index = 0;
             index < sizeof(silent_output) / sizeof(silent_output[0]); index++)
         assert(silent_output[index] == 0);
+    for (size_t index = 0;
+            index < sizeof(silent_wide_output)
+                  / sizeof(silent_wide_output[0]); index++)
+        assert(silent_wide_output[index] == 0);
 }
 
 int main(void)
@@ -244,6 +288,7 @@ int main(void)
     test_range_modes();
     test_audio_pan_and_envelope();
     test_polyphony_limit();
+    test_wide_mix_preserves_overload_headroom();
     test_silent_render_preserves_engine_timing();
     puts("granular_engine_test: all checks passed");
     return 0;

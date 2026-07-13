@@ -8,6 +8,7 @@ budget. Measurements for the current native ELF and bank are:
 - resident nine-sample PCM library: approximately 10.15 MiB;
 - cached min/max waveforms for all nine samples: 11.25 KiB;
 - NDSP stream buffers: 8 KiB;
+- signed 32-bit grain/effects scratch buffer: 4 KiB;
 - expanded four-line FDN storage: 187.5 KiB;
 - sixteen grain voice states: less than 1 KiB;
 - stereo four-stage phaser state: less than 100 bytes;

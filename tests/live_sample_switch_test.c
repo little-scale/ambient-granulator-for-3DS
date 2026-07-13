@@ -13,6 +13,7 @@
 static int16_t sample_a[SWITCH_SAMPLE_COUNT];
 static int16_t sample_b[SWITCH_SAMPLE_COUNT];
 static int16_t output[SWITCH_TEST_FRAMES * 2];
+static int32_t mix_output[SWITCH_TEST_FRAMES * 2];
 
 static bool buffer_has_audio(const int16_t *samples, size_t frames)
 {
@@ -71,20 +72,26 @@ int main(void)
     granular_engine_set_sample(&engine, sample_a, SWITCH_SAMPLE_COUNT, 16384);
     assert(effects_chain_init(&chain));
     granular_engine_trigger(&engine, grains.center_x, grains.grain_count);
-    granular_engine_render(&engine, output, SWITCH_TEST_FRAMES, &grains);
-    effects_chain_process(&chain, output, SWITCH_TEST_FRAMES, &effects);
+    granular_engine_render_wide(&engine, mix_output,
+                                SWITCH_TEST_FRAMES, &grains);
+    effects_chain_process_wide(&chain, mix_output, output,
+                               SWITCH_TEST_FRAMES, &effects);
     assert(buffer_has_audio(output, SWITCH_TEST_FRAMES));
 
     effects.freeze = true;
     granular_engine_set_sample(&engine, sample_b, SWITCH_SAMPLE_COUNT, 16384);
     memset(output, 0, sizeof(output));
-    effects_chain_process(&chain, output, SWITCH_TEST_FRAMES, &effects);
+    memset(mix_output, 0, sizeof(mix_output));
+    effects_chain_process_wide(&chain, mix_output, output,
+                               SWITCH_TEST_FRAMES, &effects);
     assert(buffer_has_audio(output, SWITCH_TEST_FRAMES));
 
     effects.freeze = false;
     granular_engine_trigger(&engine, 240, 1);
-    granular_engine_render(&engine, output, SWITCH_TEST_FRAMES, &grains);
-    effects_chain_process(&chain, output, SWITCH_TEST_FRAMES, &effects);
+    granular_engine_render_wide(&engine, mix_output,
+                                SWITCH_TEST_FRAMES, &grains);
+    effects_chain_process_wide(&chain, mix_output, output,
+                               SWITCH_TEST_FRAMES, &effects);
     assert(buffer_has_audio(output, SWITCH_TEST_FRAMES));
     effects_chain_exit(&chain);
     puts("live_sample_switch_test: all checks passed");

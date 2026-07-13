@@ -45,6 +45,15 @@ static int16_t clamp_sample(int64_t value)
     return (int16_t)value;
 }
 
+static int32_t clamp_wide_sample(int64_t value)
+{
+    if (value < INT32_MIN)
+        return INT32_MIN;
+    if (value > INT32_MAX)
+        return INT32_MAX;
+    return (int32_t)value;
+}
+
 int granular_interval_frames(int output_rate, bool synced, int bpm,
                              int denominator, int interval_ms)
 {
@@ -292,8 +301,8 @@ void granular_engine_trigger(GranularEngine *engine, int center_x,
                           ^ engine->grains_launched;
 }
 
-void granular_engine_render(GranularEngine *engine, int16_t *output,
-                            size_t frames, const GranularConfig *config)
+static int prepare_render(GranularEngine *engine,
+                          const GranularConfig *config)
 {
     int limit = voice_limit(config);
     for (int index = limit; index < GRANULAR_VOICE_COUNT; index++)
@@ -305,51 +314,100 @@ void granular_engine_render(GranularEngine *engine, int16_t *output,
         granular_engine_trigger(engine, config->center_x,
                                 config->grain_count);
     engine->previous_gate = config->gate;
+    return limit;
+}
 
+static void render_frame(GranularEngine *engine,
+                         const GranularConfig *config, int limit,
+                         int64_t *left, int64_t *right)
+{
+    update_scheduler(engine, config);
+    *left = 0;
+    *right = 0;
+    for (int index = 0; index < limit; index++) {
+        GranularVoice *voice = &engine->voices[index];
+        if (!voice->active)
+            continue;
+
+        uint32_t sample_index = (uint32_t)(voice->position_q16 >> 16);
+        if (sample_index >= voice->length) {
+            voice->active = false;
+            continue;
+        }
+        uint32_t next_index = sample_index + 1;
+        if (next_index >= voice->length)
+            next_index = sample_index;
+        uint32_t fraction = (uint32_t)voice->position_q16 & 0xFFFFU;
+        int32_t first = voice->source[sample_index];
+        int32_t second = voice->source[next_index];
+        int32_t value = first + (int32_t)(((int64_t)(second - first)
+                                         * fraction) >> 16);
+
+        int32_t envelope = 32767;
+        if (voice->attack_samples > 0
+                && sample_index < voice->attack_samples)
+            envelope = (int32_t)((uint64_t)sample_index * 32767
+                               / voice->attack_samples);
+        uint32_t from_end = voice->length - 1 - sample_index;
+        if (voice->release_samples > 0
+                && from_end < voice->release_samples) {
+            int32_t release = (int32_t)((uint64_t)from_end * 32767
+                                      / voice->release_samples);
+            if (release < envelope)
+                envelope = release;
+        }
+
+        value = (int32_t)((int64_t)value * envelope / 32767);
+        *left += (int64_t)value * voice->left_gain_q8 / 256;
+        *right += (int64_t)value * voice->right_gain_q8 / 256;
+        voice->position_q16 += voice->step_q16;
+    }
+    engine->rendered_frames++;
+}
+
+void granular_engine_render(GranularEngine *engine, int16_t *output,
+                            size_t frames, const GranularConfig *config)
+{
+    int limit = prepare_render(engine, config);
+    for (size_t frame = 0; frame < frames; frame++) {
+        int64_t left;
+        int64_t right;
+        render_frame(engine, config, limit, &left, &right);
+        output[frame * 2] = clamp_sample(left);
+        output[frame * 2 + 1] = clamp_sample(right);
+    }
+}
+
+void granular_engine_render_wide(GranularEngine *engine, int32_t *output,
+                                 size_t frames,
+                                 const GranularConfig *config)
+{
+    int limit = prepare_render(engine, config);
+    for (size_t frame = 0; frame < frames; frame++) {
+        int64_t left;
+        int64_t right;
+        render_frame(engine, config, limit, &left, &right);
+        output[frame * 2] = clamp_wide_sample(left);
+        output[frame * 2 + 1] = clamp_wide_sample(right);
+    }
+}
+
+static void render_silent_frames(GranularEngine *engine, size_t frames,
+                                 const GranularConfig *config, int limit)
+{
     for (size_t frame = 0; frame < frames; frame++) {
         update_scheduler(engine, config);
-        int64_t left = 0;
-        int64_t right = 0;
         for (int index = 0; index < limit; index++) {
             GranularVoice *voice = &engine->voices[index];
             if (!voice->active)
                 continue;
-
             uint32_t sample_index = (uint32_t)(voice->position_q16 >> 16);
             if (sample_index >= voice->length) {
                 voice->active = false;
                 continue;
             }
-            uint32_t next_index = sample_index + 1;
-            if (next_index >= voice->length)
-                next_index = sample_index;
-            uint32_t fraction = (uint32_t)voice->position_q16 & 0xFFFFU;
-            int32_t first = voice->source[sample_index];
-            int32_t second = voice->source[next_index];
-            int32_t value = first + (int32_t)(((int64_t)(second - first)
-                                             * fraction) >> 16);
-
-            int32_t envelope = 32767;
-            if (voice->attack_samples > 0
-                    && sample_index < voice->attack_samples)
-                envelope = (int32_t)((uint64_t)sample_index * 32767
-                                   / voice->attack_samples);
-            uint32_t from_end = voice->length - 1 - sample_index;
-            if (voice->release_samples > 0
-                    && from_end < voice->release_samples) {
-                int32_t release = (int32_t)((uint64_t)from_end * 32767
-                                          / voice->release_samples);
-                if (release < envelope)
-                    envelope = release;
-            }
-
-            value = (int32_t)((int64_t)value * envelope / 32767);
-            left += (int64_t)value * voice->left_gain_q8 / 256;
-            right += (int64_t)value * voice->right_gain_q8 / 256;
             voice->position_q16 += voice->step_q16;
         }
-        output[frame * 2] = clamp_sample(left);
-        output[frame * 2 + 1] = clamp_sample(right);
         engine->rendered_frames++;
     }
 }
@@ -358,33 +416,18 @@ void granular_engine_render_silent(GranularEngine *engine, int16_t *output,
                                    size_t frames,
                                    const GranularConfig *config)
 {
-    int limit = voice_limit(config);
-    for (int index = limit; index < GRANULAR_VOICE_COUNT; index++)
-        engine->voices[index].active = false;
-    if (engine->next_voice >= limit)
-        engine->next_voice = 0;
-
-    if (config->gate && !engine->previous_gate)
-        granular_engine_trigger(engine, config->center_x,
-                                config->grain_count);
-    engine->previous_gate = config->gate;
-
+    int limit = prepare_render(engine, config);
     memset(output, 0, frames * 2 * sizeof(*output));
-    for (size_t frame = 0; frame < frames; frame++) {
-        update_scheduler(engine, config);
-        for (int index = 0; index < limit; index++) {
-            GranularVoice *voice = &engine->voices[index];
-            if (!voice->active)
-                continue;
-            uint32_t sample_index = (uint32_t)(voice->position_q16 >> 16);
-            if (sample_index >= voice->length) {
-                voice->active = false;
-                continue;
-            }
-            voice->position_q16 += voice->step_q16;
-        }
-        engine->rendered_frames++;
-    }
+    render_silent_frames(engine, frames, config, limit);
+}
+
+void granular_engine_render_silent_wide(GranularEngine *engine,
+                                        int32_t *output, size_t frames,
+                                        const GranularConfig *config)
+{
+    int limit = prepare_render(engine, config);
+    memset(output, 0, frames * 2 * sizeof(*output));
+    render_silent_frames(engine, frames, config, limit);
 }
 
 bool granular_engine_pop_marker(GranularEngine *engine,

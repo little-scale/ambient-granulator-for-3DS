@@ -47,6 +47,9 @@ typedef struct {
     int lowpass_alpha_q15;
     int configured_size;
     int configured_damping;
+    uint64_t input_overload_events;
+    uint64_t fdn_overload_events;
+    bool block_overloaded;
     bool initialized;
 } EffectsChain;
 
@@ -60,6 +63,12 @@ void effects_chain_reset(EffectsChain *chain);
 void effects_chain_process(EffectsChain *chain,
                            int16_t *interleaved_stereo, size_t frames,
                            const EffectsConfig *config);
+void effects_chain_process_wide(EffectsChain *chain,
+                                const int32_t *input_interleaved_stereo,
+                                int16_t *output_interleaved_stereo,
+                                size_t frames,
+                                const EffectsConfig *config);
+bool effects_chain_overloaded(const EffectsChain *chain);
 void effects_chain_exit(EffectsChain *chain);
 
 #endif

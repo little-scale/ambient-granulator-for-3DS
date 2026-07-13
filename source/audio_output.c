@@ -1,6 +1,7 @@
 #include "audio_output.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int16_t *buffer_samples(AudioOutput *output, int index)
@@ -13,15 +14,20 @@ static void submit_buffer(AudioOutput *output, int index,
 {
     int16_t *samples = buffer_samples(output, index);
     if (config->effects.freeze && config->effects.wet_percent >= 100)
-        granular_engine_render_silent(&output->engine, samples,
-                                      AUDIO_BUFFER_FRAMES,
-                                      &config->granular);
+        granular_engine_render_silent_wide(&output->engine,
+                                           output->mix_samples,
+                                           AUDIO_BUFFER_FRAMES,
+                                           &config->granular);
     else
-        granular_engine_render(&output->engine, samples,
-                               AUDIO_BUFFER_FRAMES, &config->granular);
-    effects_chain_process(&output->effects, samples,
-                          AUDIO_BUFFER_FRAMES, &config->effects);
+        granular_engine_render_wide(&output->engine, output->mix_samples,
+                                    AUDIO_BUFFER_FRAMES,
+                                    &config->granular);
+    effects_chain_process_wide(&output->effects, output->mix_samples,
+                               samples, AUDIO_BUFFER_FRAMES,
+                               &config->effects);
     output_meter_process(&output->meter, samples, AUDIO_BUFFER_FRAMES);
+    if (effects_chain_overloaded(&output->effects))
+        output_meter_mark_clipped(&output->meter);
     DSP_FlushDataCache(samples,
         AUDIO_BUFFER_FRAMES * 2 * sizeof(*samples));
     ndspChnWaveBufAdd(0, &output->wave_buffers[index]);
@@ -51,7 +57,13 @@ bool audio_output_init(AudioOutput *output,
 
     output->samples = linearAlloc(AUDIO_BUFFER_COUNT * AUDIO_BUFFER_FRAMES
                                   * 2 * sizeof(*output->samples));
-    if (output->samples == NULL) {
+    output->mix_samples = malloc(AUDIO_BUFFER_FRAMES * 2
+                               * sizeof(*output->mix_samples));
+    if (output->samples == NULL || output->mix_samples == NULL) {
+        linearFree(output->samples);
+        free(output->mix_samples);
+        output->samples = NULL;
+        output->mix_samples = NULL;
         effects_chain_exit(&output->effects);
         ndspExit();
         output->init_result = -1;
@@ -159,6 +171,8 @@ void audio_output_exit(AudioOutput *output)
     ndspExit();
     effects_chain_exit(&output->effects);
     linearFree(output->samples);
+    free(output->mix_samples);
     output->samples = NULL;
+    output->mix_samples = NULL;
     output->ready = false;
 }

@@ -6,6 +6,8 @@
 #include <string.h>
 
 #define DS_EFFECTS_SAMPLE_RATE 16384
+#define SOFT_LIMIT_KNEE 30000
+#define SOFT_LIMIT_RANGE (INT16_MAX - SOFT_LIMIT_KNEE)
 
 static int clamp_int(int value, int minimum, int maximum)
 {
@@ -23,6 +25,57 @@ static int16_t clamp_sample(int64_t value)
     if (value > INT16_MAX)
         return INT16_MAX;
     return (int16_t)value;
+}
+
+static int16_t soft_limit_sample(int64_t value, bool *overloaded)
+{
+    bool negative = value < 0;
+    uint64_t magnitude = negative
+        ? (uint64_t)(-(value + 1)) + 1 : (uint64_t)value;
+    if (value < INT16_MIN || value > INT16_MAX)
+        *overloaded = true;
+    if (magnitude <= SOFT_LIMIT_KNEE)
+        return (int16_t)value;
+
+    uint64_t excess = magnitude - SOFT_LIMIT_KNEE;
+    uint64_t compressed = SOFT_LIMIT_KNEE
+        + (uint64_t)SOFT_LIMIT_RANGE * excess
+        / (excess + SOFT_LIMIT_RANGE);
+    if (compressed > INT16_MAX)
+        compressed = INT16_MAX;
+    return (int16_t)(negative ? -(int64_t)compressed
+                              : (int64_t)compressed);
+}
+
+static int32_t limit_input(EffectsChain *chain, int64_t value)
+{
+    bool overloaded = false;
+    int16_t limited = soft_limit_sample(value, &overloaded);
+    if (overloaded) {
+        chain->block_overloaded = true;
+        chain->input_overload_events++;
+    }
+    return limited;
+}
+
+static int32_t limit_fdn(EffectsChain *chain, int64_t value, bool freeze)
+{
+    if (freeze) {
+        bool overloaded = value < INT16_MIN || value > INT16_MAX;
+        if (overloaded) {
+            chain->block_overloaded = true;
+            chain->fdn_overload_events++;
+        }
+        return clamp_sample(value);
+    }
+
+    bool overloaded = false;
+    int16_t limited = soft_limit_sample(value, &overloaded);
+    if (overloaded) {
+        chain->block_overloaded = true;
+        chain->fdn_overload_events++;
+    }
+    return limited;
 }
 
 int effects_lowpass_alpha_q15(int cutoff_hz, int sample_rate)
@@ -73,7 +126,7 @@ static int32_t process_allpass(EffectsChain *chain, int channel,
     for (int stage = 0; stage < EFFECTS_PHASER_STAGES; stage++) {
         EffectsAllpassState *state = &chain->phaser[channel][stage];
         int64_t numerator = -(int64_t)coefficient_q15 * value
-                          + ((int64_t)state->previous_input << 15)
+                          + (int64_t)state->previous_input * 32768
                           + (int64_t)coefficient_q15
                           * state->previous_output;
         int32_t output = (int32_t)(numerator >> 15);
@@ -194,13 +247,18 @@ void effects_chain_reset(EffectsChain *chain)
     memset(chain->phaser, 0, sizeof(chain->phaser));
     chain->phaser_phase = 0;
     memset(chain->filters, 0, sizeof(chain->filters));
+    chain->input_overload_events = 0;
+    chain->fdn_overload_events = 0;
+    chain->block_overloaded = false;
 }
 
-void effects_chain_process(EffectsChain *chain, int16_t *samples,
-                           size_t frames, const EffectsConfig *config)
+static void process(EffectsChain *chain, const int16_t *narrow_input,
+                    const int32_t *wide_input, int16_t *output,
+                    size_t frames, const EffectsConfig *config)
 {
     if (!chain->initialized)
         return;
+    chain->block_overloaded = false;
     configure(chain, config);
     int wet = clamp_int(config->wet_percent, 0, 100);
     int phaser_depth = clamp_int(config->phaser_depth_percent, 0, 100);
@@ -208,8 +266,12 @@ void effects_chain_process(EffectsChain *chain, int16_t *samples,
         config->phaser_speed_hundredths_hz, EFFECTS_SAMPLE_RATE);
 
     for (size_t frame = 0; frame < frames; frame++) {
-        int32_t dry_left = samples[frame * 2];
-        int32_t dry_right = samples[frame * 2 + 1];
+        int64_t raw_left = wide_input != NULL
+            ? wide_input[frame * 2] : narrow_input[frame * 2];
+        int64_t raw_right = wide_input != NULL
+            ? wide_input[frame * 2 + 1] : narrow_input[frame * 2 + 1];
+        int32_t dry_left = limit_input(chain, raw_left);
+        int32_t dry_right = limit_input(chain, raw_right);
         int32_t source_left = dry_left;
         int32_t source_right = dry_right;
         if (phaser_depth > 0) {
@@ -246,7 +308,7 @@ void effects_chain_process(EffectsChain *chain, int16_t *samples,
         };
 
         for (int line = 0; line < EFFECTS_FDN_LINES; line++) {
-            int32_t target = clamp_sample(matrix[line]);
+            int32_t target = limit_fdn(chain, matrix[line], config->freeze);
             if (config->freeze)
                 chain->damped[line] = target;
             else
@@ -254,8 +316,9 @@ void effects_chain_process(EffectsChain *chain, int16_t *samples,
                     - chain->damped[line]) * chain->damping_q15) >> 15);
             int32_t feedback = (int32_t)((int64_t)chain->damped[line]
                                        * chain->feedback_q15 >> 15);
-            *delay_cell(chain, line, chain->positions[line]) = clamp_sample(
-                input[line] + feedback);
+            *delay_cell(chain, line, chain->positions[line]) = (int16_t)
+                limit_fdn(chain, (int64_t)input[line] + feedback,
+                          config->freeze);
             chain->positions[line]++;
         }
 
@@ -271,9 +334,29 @@ void effects_chain_process(EffectsChain *chain, int16_t *samples,
                                     chain, config);
         mixed_right = process_filter(&chain->filters[1], mixed_right,
                                      chain, config);
-        samples[frame * 2] = clamp_sample(mixed_left);
-        samples[frame * 2 + 1] = clamp_sample(mixed_right);
+        output[frame * 2] = (int16_t)limit_fdn(
+            chain, mixed_left, config->freeze);
+        output[frame * 2 + 1] = (int16_t)limit_fdn(
+            chain, mixed_right, config->freeze);
     }
+}
+
+void effects_chain_process(EffectsChain *chain, int16_t *samples,
+                           size_t frames, const EffectsConfig *config)
+{
+    process(chain, samples, NULL, samples, frames, config);
+}
+
+void effects_chain_process_wide(EffectsChain *chain,
+                                const int32_t *input, int16_t *output,
+                                size_t frames, const EffectsConfig *config)
+{
+    process(chain, NULL, input, output, frames, config);
+}
+
+bool effects_chain_overloaded(const EffectsChain *chain)
+{
+    return chain->block_overloaded;
 }
 
 void effects_chain_exit(EffectsChain *chain)

@@ -45,3 +45,8 @@ bool output_meter_clipping(const OutputMeter *meter)
 {
     return meter->clip_hold_blocks > 0;
 }
+
+void output_meter_mark_clipped(OutputMeter *meter)
+{
+    meter->clip_hold_blocks = OUTPUT_METER_CLIP_HOLD_BLOCKS;
+}

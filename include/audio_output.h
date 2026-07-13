@@ -22,6 +22,7 @@ typedef struct {
     bool ready;
     Result init_result;
     int16_t *samples;
+    int32_t *mix_samples;
     ndspWaveBuf wave_buffers[AUDIO_BUFFER_COUNT];
     GranularEngine engine;
     EffectsChain effects;

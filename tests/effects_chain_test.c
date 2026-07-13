@@ -9,6 +9,7 @@
 #define TEST_FRAMES 16000
 
 static int16_t output[TEST_FRAMES * 2];
+static int32_t wide_input[TEST_FRAMES * 2];
 
 static EffectsConfig default_config(void)
 {
@@ -178,6 +179,50 @@ static void test_subtle_stereo_phaser(void)
     effects_chain_exit(&chain);
 }
 
+static void test_wide_soft_limit_and_internal_overload(void)
+{
+    EffectsChain chain;
+    EffectsConfig config = default_config();
+    config.wet_percent = 0;
+    config.phaser_depth_percent = 0;
+    assert(effects_chain_init(&chain));
+
+    memset(wide_input, 0, sizeof(wide_input));
+    wide_input[0] = 200000;
+    wide_input[1] = -200000;
+    effects_chain_process_wide(&chain, wide_input, output, 16, &config);
+    assert(output[0] > 30000 && output[0] < 32767);
+    assert(output[1] < -30000 && output[1] > -32768);
+    assert(effects_chain_overloaded(&chain));
+    assert(chain.input_overload_events == 2);
+
+    memset(wide_input, 0, 16 * 2 * sizeof(*wide_input));
+    wide_input[0] = 10000;
+    wide_input[1] = INT16_MIN;
+    effects_chain_process_wide(&chain, wide_input, output, 16, &config);
+    assert(output[0] == 10000);
+    assert(output[1] < -30000);
+    assert(!effects_chain_overloaded(&chain));
+
+    config.wet_percent = 100;
+    config.feedback_tenths_percent = 999;
+    effects_chain_process_wide(&chain, wide_input, output, 1, &config);
+    for (int line = 0; line < EFFECTS_FDN_LINES; line++)
+        chain.delay[line * EFFECTS_FDN_MAX_DELAY + chain.positions[line]]
+            = 32767;
+    uint64_t before = chain.fdn_overload_events;
+    memset(wide_input, 0, 2 * sizeof(*wide_input));
+    effects_chain_process_wide(&chain, wide_input, output, 1, &config);
+    assert(effects_chain_overloaded(&chain));
+    assert(chain.fdn_overload_events > before);
+
+    effects_chain_reset(&chain);
+    assert(chain.input_overload_events == 0);
+    assert(chain.fdn_overload_events == 0);
+    assert(!effects_chain_overloaded(&chain));
+    effects_chain_exit(&chain);
+}
+
 int main(void)
 {
     test_coefficients();
@@ -185,6 +230,7 @@ int main(void)
     test_stereo_reverb_tail();
     test_freeze_blocks_excitation_but_keeps_dry();
     test_subtle_stereo_phaser();
+    test_wide_soft_limit_and_internal_overload();
     test_output_filters();
     puts("effects_chain_test: all checks passed");
     return 0;

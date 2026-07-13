@@ -13,5 +13,9 @@ test("standalone artifact embeds all runtime code and styling", () => {
   assert.doesNotMatch(html, /<script[^>]+src=/i);
   assert.doesNotMatch(html, /<link[^>]+stylesheet/i);
   assert.doesNotMatch(html, /\bfetch\s*\(/);
-  assert.ok(Buffer.byteLength(html) > 30000);
+  assert.match(html, /OPEN \.3DSX/);
+  assert.match(html, /DOWNLOAD PATCHED \.3DSX/);
+  assert.match(html, /function extract3dsxBank/);
+  assert.match(html, /function patch3dsxBank/);
+  assert.ok(Buffer.byteLength(html) > 35000);
 });

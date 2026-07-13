@@ -1,7 +1,7 @@
 const elements = {
-  bankInput: document.querySelector("#bank-input"),
+  applicationInput: document.querySelector("#application-input"),
   audioInput: document.querySelector("#audio-input"),
-  bankDrop: document.querySelector("#bank-drop"),
+  applicationDrop: document.querySelector("#application-drop"),
   audioDrop: document.querySelector("#audio-drop"),
   exportButton: document.querySelector("#export-button"),
   status: document.querySelector("#status"),
@@ -27,6 +27,8 @@ const elements = {
 
 let samples = [];
 let selectedId = null;
+let applicationBytes = null;
+let applicationName = "";
 let audioContext = null;
 let playingSource = null;
 let draggingBoundary = null;
@@ -61,7 +63,10 @@ function renderBudget() {
   elements.budgetLabel.textContent = `${formatBytes(estimated)} / ${formatBytes(MAX_BANK_BYTES)} · ${samples.length}/${MAX_ENTRIES} slots`;
   elements.budgetFill.style.width = `${usage}%`;
   elements.budgetFill.classList.toggle("over", over);
-  elements.exportButton.disabled = over || samples.length === 0;
+  elements.audioInput.disabled = applicationBytes === null;
+  elements.audioDrop.classList.toggle("disabled", applicationBytes === null);
+  elements.exportButton.disabled = over || samples.length === 0
+    || applicationBytes === null;
 }
 
 function renderPool() {
@@ -198,23 +203,31 @@ function render() {
   renderEditor();
 }
 
-async function openBank(file) {
+async function openApplication(file) {
   if (!file) return;
   try {
     stopPreview();
-    const decoded = decodeBank(new Uint8Array(await file.arrayBuffer()));
+    const input = new Uint8Array(await file.arrayBuffer());
+    const embedded = extract3dsxBank(input);
+    const decoded = decodeBank(embedded.bank);
+    applicationBytes = input;
+    applicationName = file.name;
     samples = decoded.samples;
     selectedId = samples[0]?.id ?? null;
     render();
     const conversion = decoded.sampleRate === TARGET_RATE ? ""
       : ` Legacy ${decoded.sampleRate} Hz audio will be upgraded on export.`;
-    setStatus(`Opened ${file.name}: ${samples.length} samples, ${formatBytes(decoded.used)}, ${decoded.sampleRate} Hz.${conversion}`, "success");
+    setStatus(`Opened ${file.name}: ${samples.length} embedded samples, ${formatBytes(decoded.used)}, ${decoded.sampleRate} Hz.${conversion}`, "success");
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   }
 }
 
 async function addAudio(files) {
+  if (applicationBytes === null) {
+    setStatus("Open 3ds_granulator.3dsx before adding audio.", "error");
+    return;
+  }
   const incoming = Array.from(files).filter(file =>
     /\.(wav|aif|aiff|mp3|m4a|ogg|flac)$/i.test(file.name));
   if (!incoming.length) {
@@ -266,16 +279,21 @@ async function addAudio(files) {
   }
 }
 
-function exportBank() {
+function exportApplication() {
   try {
-    const output = buildBank(samples);
+    if (applicationBytes === null)
+      throw new Error("Open 3ds_granulator.3dsx before exporting.");
+    const bank = buildBank(samples);
+    const output = patch3dsxBank(applicationBytes, bank);
     const blob = new Blob([output], { type: "application/octet-stream" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "sample_bank.bin";
+    const stem = applicationName.replace(/\.3dsx$/i, "")
+      || "3ds_granulator";
+    link.download = `${stem}-patched.3dsx`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-    setStatus(`Built ${samples.length} samples into ${formatBytes(output.length)} at 48 kHz mono PCM16. Copy sample_bank.bin to /3ds/3ds-granulator/ on the SD card.`, "success");
+    setStatus(`Built ${link.download}: ${samples.length} embedded samples, ${formatBytes(bank.length)} bank, ${formatBytes(output.length)} application.`, "success");
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   }
@@ -364,11 +382,12 @@ function installDropZone(element, handler) {
   });
 }
 
-elements.bankInput.addEventListener("change", () => openBank(elements.bankInput.files?.[0]));
+elements.applicationInput.addEventListener("change", () =>
+  openApplication(elements.applicationInput.files?.[0]));
 elements.audioInput.addEventListener("change", () => addAudio(elements.audioInput.files ?? []));
-installDropZone(elements.bankDrop, files => openBank(files[0]));
+installDropZone(elements.applicationDrop, files => openApplication(files[0]));
 installDropZone(elements.audioDrop, addAudio);
-elements.exportButton.addEventListener("click", exportBank);
+elements.exportButton.addEventListener("click", exportApplication);
 elements.moveUp.addEventListener("click", () => moveSelected(-1));
 elements.moveDown.addEventListener("click", () => moveSelected(1));
 elements.remove.addEventListener("click", removeSelected);

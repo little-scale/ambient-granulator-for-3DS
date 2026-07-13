@@ -16,6 +16,7 @@ typedef struct {
 void output_meter_init(OutputMeter *meter);
 void output_meter_process(OutputMeter *meter,
                           const int16_t *interleaved_stereo, size_t frames);
+void output_meter_mark_clipped(OutputMeter *meter);
 bool output_meter_clipping(const OutputMeter *meter);
 
 #endif

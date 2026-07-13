@@ -4,34 +4,34 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>3DS Granulator Sample-Bank Patcher</title>
+  <title>3DS Granulator .3DSX Patcher</title>
   <style>/*__PATCHER_CSS__*/</style>
 </head>
 <body>
   <main class="app-shell">
     <header class="masthead">
       <div>
-        <h1>3DS GRANULATOR BANK PATCHER</h1>
+        <h1>3DS GRANULATOR .3DSX PATCHER</h1>
         <p>standalone · offline · audio stays on this device</p>
       </div>
       <div class="format-stamp">PCM16 · MONO · 48000 HZ</div>
     </header>
 
-    <section class="workflow" aria-label="Sample bank workflow">
-      <label class="drop-zone" id="bank-drop">
-        <input id="bank-input" type="file" accept=".bin,application/octet-stream">
-        <b>OPEN BANK</b>
-        <span>optional existing sample_bank.bin</span>
+    <section class="workflow" aria-label="Application patching workflow">
+      <label class="drop-zone" id="application-drop">
+        <input id="application-input" type="file" accept=".3dsx,application/octet-stream">
+        <b>OPEN .3DSX</b>
+        <span>loads its embedded sample bank</span>
       </label>
       <label class="drop-zone" id="audio-drop">
         <input id="audio-input" type="file" accept="audio/*,.wav,.aif,.aiff,.flac,.mp3,.m4a,.ogg" multiple>
         <b>ADD AUDIO</b>
-        <span>drop multiple files or click</span>
+        <span>available after opening the app</span>
       </label>
-      <button class="export-button" id="export-button" disabled>DOWNLOAD SAMPLE_BANK.BIN</button>
+      <button class="export-button" id="export-button" disabled>DOWNLOAD PATCHED .3DSX</button>
     </section>
 
-    <div class="status" id="status" role="status">Add audio or open an existing bank to begin.</div>
+    <div class="status" id="status" role="status">Open 3ds_granulator.3dsx to begin.</div>
 
     <section class="budget-panel" aria-label="Bank capacity">
       <div class="budget-heading">
@@ -81,8 +81,9 @@
     </div>
 
     <footer>
-      Copy the downloaded file to <code>/3ds/3ds-granulator/sample_bank.bin</code>
-      on the console SD card. No ROM modification is required.
+      The downloaded application contains the edited bank. Copy the patched
+      <code>.3dsx</code> to <code>/3ds/3ds-granulator/</code> on the console SD card.
+      Remove any older <code>sample_bank.bin</code> override from that directory.
     </footer>
   </main>
   <script type="module">/*__PATCHER_JS__*/</script>

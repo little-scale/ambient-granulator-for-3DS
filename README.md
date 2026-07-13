@@ -10,6 +10,60 @@ The Homebrew Launcher menu title is **Ambient Granulator for 3DS**. The
 retained for compatibility with existing SD-card installs and sample-bank
 overrides.
 
+## Quick start
+
+### 1. Prepare the console
+
+Ambient Granulator requires a Nintendo 3DS/2DS that can run `.3dsx` homebrew.
+On this platform the menu is normally called **Homebrew Launcher** rather than
+Homebrew Channel.
+
+- For an unmodified console, begin with the maintained
+  [3DS Hacks Guide](https://3ds.hacks.guide/) and let its
+  [Get Started](https://3ds.hacks.guide/get-started.html) page select the method
+  appropriate for the exact console model and system version. Do not treat this
+  repository as a substitute for that guide.
+- Complete the guide's
+  [Finalizing Setup](https://3ds.hacks.guide/finalizing-setup.html), including
+  Homebrew Launcher installation and its **RTC and DSP setup** section. The DSP
+  firmware dump is required for native audio.
+- If the console already has a current boot9strap/Luma3DS setup, Homebrew
+  Launcher, and dumped DSP firmware, no additional modification is needed.
+
+### 2. Build and copy the application
+
+Use a provided `3ds_granulator.3dsx`, or build the current source with Docker
+Desktop:
+
+```sh
+./scripts/setup.sh
+./scripts/package-sd.sh
+```
+
+Copy the resulting `dist/3ds/3ds-granulator` directory into the SD card's
+`/3ds/` directory. The finished layout is:
+
+```text
+/3ds/3ds-granulator/
+└── 3ds_granulator.3dsx
+```
+
+Reinsert the SD card, open Homebrew Launcher, and select **Ambient Granulator
+for 3DS**. If the top screen reports `DSP FIRM MISSING`, complete the DSP step
+linked above before troubleshooting the sampler itself.
+
+### 3. Make a self-contained custom sample build
+
+Open
+[`browser-patcher/standalone/3ds-granulator-patcher.html`](browser-patcher/standalone/3ds-granulator-patcher.html)
+directly in a current desktop browser. Open `3ds_granulator.3dsx`, edit or add
+samples, and choose **Download Patched .3DSX**. Keep a backup of the original,
+rename the download to `3ds_granulator.3dsx`, and replace the file on the SD
+card. The edited sample bank is embedded in the downloaded application; no
+second bank file is required. Remove any older
+`/3ds/3ds-granulator/sample_bank.bin` override so it does not take priority over
+the newly embedded bank.
+
 ## Current status
 
 Milestones 1–6 have an initial native baseline:
@@ -29,6 +83,10 @@ Milestones 1–6 have an initial native baseline:
   display waveforms before NDSP starts;
 - the actual loaded sample rendered as a min/max waveform;
 - an adjustable 1–16 voice granular engine with linear source interpolation;
+- a 32-bit grain-to-effects mix with a low-cost soft overload knee, avoiding
+  the former hard PCM16 clamp before phaser and reverb excitation;
+- a single-file offline browser patcher that opens the native `.3dsx`, edits
+  its embedded bank, and emits a new self-contained application;
 - sample-clock burst scheduling independent of display VBlank;
 - free-running timing and BPM-synchronised 1/8, 1/16, 1/32 and 1/64 divisions;
 - continuous touch/A gating and discrete B-triggered bursts;
@@ -46,8 +104,9 @@ Milestones 1–6 have an initial native baseline:
 - a lightweight four-stage stereo phaser before the reverb, with depth and a
   deliberately slow 0.01–1.00 Hz sweep;
 - stereo first-order HPF and LPF after the wet/dry mix;
-- post-chain stereo peak bars, a decaying dBFS readout, and a held full-scale
-  `CLIP` warning immediately before NDSP submission;
+- post-chain stereo peak bars, a decaying dBFS readout, and a held `CLIP`
+  warning covering final PCM, pre-effects grain overload, and internal FDN
+  overload;
 - an `XRUN` counter that detects the entire four-buffer NDSP queue running dry,
   separating app-side starvation from clicks introduced by an emulator or
   downstream audio device;
@@ -182,21 +241,25 @@ grain voices independently.
 ## Standalone browser sample-bank patcher
 
 [`browser-patcher/standalone/3ds-granulator-patcher.html`](browser-patcher/standalone/3ds-granulator-patcher.html)
-is a self-contained offline editor. Open it directly from Finder or another
-file browser; it does not need a local server, installation, account, upload,
-or network connection.
+is a self-contained offline `.3dsx` editor. Open it directly from Finder or
+another file browser; it does not need a local server, installation, account,
+upload, or network connection.
 
-It can open an existing 16.384 or 48 kHz `NDSGRN01` bank or start from local
-audio, then preview, rename, trim, gain-adjust, reorder, and remove up to 64
-samples. Exported audio is downmixed and converted with the same cached 32-tap
-windowed-sinc resampler to 48 kHz signed mono PCM16, then written to a compact,
-CRC-protected bank. Copy the downloaded file to:
+It opens `3ds_granulator.3dsx`, validates its RomFS layout, extracts the embedded
+16.384 or 48 kHz `NDSGRN01` bank, and allows up to 64 samples to be previewed,
+renamed, trimmed, gain-adjusted, reordered, removed, or added. Exported audio is
+downmixed and converted with the same cached 32-tap windowed-sinc resampler to
+48 kHz signed mono PCM16. The editor replaces the RomFS bank and downloads a
+new self-contained `.3dsx`; no separate sample bank is required on the SD card.
+Copy the patched application to:
 
 ```text
-/3ds/3ds-granulator/sample_bank.bin
+/3ds/3ds-granulator/3ds_granulator-patched.3dsx
 ```
 
-The patcher uses a conservative 16 MiB capacity limit and processes audio only
+The existing SD-card `sample_bank.bin` override remains supported for development
+and recovery, but is not part of the normal browser-patcher workflow. The
+patcher uses a conservative 16 MiB capacity limit and processes audio only
 inside the browser. Its authoring and test instructions are in
 [`browser-patcher/README.md`](browser-patcher/README.md).
 

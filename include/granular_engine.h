@@ -86,10 +86,17 @@ void granular_engine_trigger(GranularEngine *engine, int center_x,
 void granular_engine_render(GranularEngine *engine,
                             int16_t *interleaved_stereo, size_t frames,
                             const GranularConfig *config);
+void granular_engine_render_wide(GranularEngine *engine,
+                                 int32_t *interleaved_stereo, size_t frames,
+                                 const GranularConfig *config);
 void granular_engine_render_silent(GranularEngine *engine,
                                    int16_t *interleaved_stereo,
                                    size_t frames,
                                    const GranularConfig *config);
+void granular_engine_render_silent_wide(GranularEngine *engine,
+                                        int32_t *interleaved_stereo,
+                                        size_t frames,
+                                        const GranularConfig *config);
 bool granular_engine_pop_marker(GranularEngine *engine,
                                 GranularMarker *marker);
 int granular_engine_active_voices(const GranularEngine *engine);

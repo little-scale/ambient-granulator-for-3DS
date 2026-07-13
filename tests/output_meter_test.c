@@ -40,6 +40,13 @@ int main(void)
     assert(output_meter_clipping(&meter));
     output_meter_process(&meter, samples, 16);
     assert(!output_meter_clipping(&meter));
+
+    output_meter_mark_clipped(&meter);
+    assert(output_meter_clipping(&meter));
+    memset(samples, 0, sizeof(samples));
+    for (int block = 0; block < OUTPUT_METER_CLIP_HOLD_BLOCKS; block++)
+        output_meter_process(&meter, samples, 16);
+    assert(!output_meter_clipping(&meter));
     puts("output_meter_test: all checks passed");
     return 0;
 }

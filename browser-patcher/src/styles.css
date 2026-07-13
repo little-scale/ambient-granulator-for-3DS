@@ -99,6 +99,8 @@ h2 { font-size: .95rem; letter-spacing: .05em; }
 .drop-zone b { color: inherit; font-size: .86rem; font-weight: normal; }
 .drop-zone span { font-size: .75rem; }
 .drop-zone:hover, .drop-zone.armed { border-color: var(--white); color: var(--white); }
+.drop-zone.disabled { opacity: .3; cursor: default; }
+.drop-zone.disabled:hover { border-color: #777; color: var(--grey); }
 
 .export-button {
   min-width: 260px;

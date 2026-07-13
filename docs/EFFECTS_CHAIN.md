@@ -1,12 +1,15 @@
 # Stereo effects-chain contract
 
 The native effects chain processes the granular engine's 48 kHz interleaved
-stereo output before NDSP submission.
+stereo output before NDSP submission. Grain voices accumulate into a signed
+32-bit scratch mix so polyphonic overload is still available to the effects
+input rather than being hard-clamped prematurely to PCM16.
 
 The signal order is:
 
 ```text
-granular voices -> stereo phaser -> FDN wet/dry -> HPF -> LPF -> meter -> NDSP
+granular voices -> wide mix -> soft knee -> stereo phaser -> FDN wet/dry
+                -> HPF -> LPF -> meter -> NDSP
 ```
 
 ## Phaser
@@ -64,22 +67,26 @@ HPF 0 and LPF 8 kHz displayed as `OFF` and bypassed. B + Left/Right edits in
 
 ## Output meter
 
-The stereo meter observes the final signed 16-bit PCM after both filters and
-immediately before cache flush and NDSP submission. Each 512-frame audio block
-captures independent absolute L/R peaks. The full-width stereo bars use fast
-attack and a roughly one-second visual decay, while the numerical readout
-reports the louder channel in dBFS.
+The stereo bars and dBFS readout observe the final signed 16-bit PCM after both
+filters and immediately before cache flush and NDSP submission. Each 512-frame
+audio block captures independent absolute L/R peaks. The full-width stereo bars
+use fast attack and a roughly one-second visual decay, while the numerical
+readout reports the louder channel in dBFS.
 
-If either channel reaches `32767` or `-32768`, an inverted `CLIP` block is held
-for approximately one second. The meter is diagnostic and deliberately does not
-limit or otherwise alter the audio; Gain, Vol, reverb level, or Feedback should
-be reduced when clipping is shown.
+The wide grain input and non-frozen FDN use a cheap rational soft knee above
+30000 rather than a flat hard clip. Signals below the knee remain bit-exact.
+If the raw grain mix, an internal FDN operation, or final PCM exceeds signed
+16-bit range, the inverted `CLIP` block is held for approximately one second.
+Consequently a 100%-wet reverb can now report an overloaded excitation even if
+the delayed output peak itself is modest. Gain, Vol, density, reverb level, or
+Feedback should be reduced when `CLIP` remains active.
 
 ## Acceptance limits
 
-Host-rendered tests cover coefficients, dry identity, stereo phaser motion,
-stereo tail generation, live sample changes through a frozen tail, Freeze
-excitation blocking/unity feedback, and filter responses. Azahar can confirm
-interactive sound and control changes. Feedback stability, speaker and
-headphone presentation, sleep/resume, and old-model CPU headroom require a
-physical 2DS/3DS test.
+Host-rendered tests cover coefficients, dry identity, wide polyphonic sums,
+soft overload behavior and telemetry, stereo phaser motion, stereo tail
+generation, live sample changes through a frozen tail, Freeze excitation
+blocking/unity feedback, and filter responses. Azahar can confirm interactive
+sound and control changes. Feedback stability, speaker and headphone
+presentation, sleep/resume, and old-model CPU headroom require a physical
+2DS/3DS test.
