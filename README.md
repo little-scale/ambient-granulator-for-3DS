@@ -17,8 +17,8 @@ Milestones 1–6 have an initial native baseline:
 - pinned official devkitPro container toolchain;
 - Homebrew Launcher `.3dsx` output;
 - native Citro2D rendering on both screens;
-- a compact top-screen version and short Git hash, with `+` marking a build
-  made from uncommitted changes;
+- a compact sequential two-decimal top-screen version (`V0.01`, `V0.02`, ...)
+  and short Git hash, with `+` marking a build made from uncommitted changes;
 - touchscreen, buttons, D-pad grammar, and Circle Pad input;
 - four-buffer 48 kHz stereo PCM streaming through NDSP;
 - the DS-compatible `NDSGRN01` bank format with bounds and CRC validation;
