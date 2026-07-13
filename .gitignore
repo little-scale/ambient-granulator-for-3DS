@@ -6,3 +6,4 @@ dist/
 *.smdh
 .DS_Store
 dspfirm.cdc
+samples/*.wav

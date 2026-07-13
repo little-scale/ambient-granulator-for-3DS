@@ -17,13 +17,16 @@ Milestones 1–6 have an initial native baseline:
 - pinned official devkitPro container toolchain;
 - Homebrew Launcher `.3dsx` output;
 - native Citro2D rendering on both screens;
+- a compact top-screen version and short Git hash, with `+` marking a build
+  made from uncommitted changes;
 - touchscreen, buttons, D-pad grammar, and Circle Pad input;
 - four-buffer 48 kHz stereo PCM streaming through NDSP;
 - the DS-compatible `NDSGRN01` bank format with bounds and CRC validation;
-- all nine DS samples embedded in a compact 3.5 MiB RomFS bank, with an
-  optional SD-card bank override;
-- all nine 16.384 kHz PCM samples and their display waveforms preloaded before
-  NDSP starts, then linearly resampled into the 48 kHz stereo stream;
+- all nine source samples embedded in a 10.16 MiB RomFS bank, with an optional
+  SD-card bank override;
+- all nine originals downmixed and converted with a cached 32-tap
+  windowed-sinc resampler to 48 kHz mono PCM16, then preloaded with their
+  display waveforms before NDSP starts;
 - the actual loaded sample rendered as a min/max waveform;
 - an adjustable 1–16 voice granular engine with linear source interpolation;
 - sample-clock burst scheduling independent of display VBlank;
@@ -56,12 +59,14 @@ boot correctly diagnosed missing DSP firmware as `D880A7FA`; after importing a
 firmware dump from the user's own 2DS, `NDSP READY`, advancing stream buffers,
 touch input, and audible sample output are confirmed.
 
-The current packaged build is also confirmed working reliably on the user's
+The native engine/effects baseline is confirmed working reliably on the user's
 physical Nintendo 2DS through Homebrew Launcher. Hands-on testing covers native
 NDSP audio, touch and button control, Circle Pad navigation/editing, sample
 selection, granular playback, reverb and Freeze, phaser, filters, and output
-metering without observed hardware issues. Sleep/resume, microphone recording,
-and networking remain separate acceptance passes.
+metering without observed hardware issues. The new 48 kHz source bank passes
+host and artifact validation but still needs its own hardware listening pass.
+Sleep/resume, microphone recording, and networking remain separate acceptance
+passes.
 
 This is now a real granular sampler with its core stereo DSP path, not a tone or
 raw-sample stand-in. Microphone recording and OSC networking remain to port;
@@ -128,17 +133,26 @@ services.
 ## Sample bank and loading policy
 
 The port deliberately reads the existing DS `NDSGRN01` format rather than
-inventing a second container. The bundled bank was derived byte-for-byte from
-the DS project's latest `assets/sample_bank.bin`; only the unused fixed-ROM
-padding was removed and the header capacity adjusted to the used length. PCM,
-entry offsets, names, ordering, and CRCs are unchanged.
+inventing a second container. Its existing header already records a sample
+rate, so the native loader accepts both legacy 16.384 kHz banks and new 48 kHz
+banks. The bundled bank is rebuilt from the original WAV files in the chosen
+order, downmixed to mono, converted to 48 kHz with a cached 32-tap
+Blackman-windowed sinc resampler, quantized to signed PCM16, and CRC-protected.
 
 The project owner has confirmed that every sample currently included in the
 bundled bank is non-copyrighted material and may be kept with the project
 source. This statement applies to the present bank only; users remain
 responsible for the rights to audio placed into replacement banks.
 
-To repeat that import from the preserved DS project:
+To reproduce the native bank from local source WAVs in `samples/`:
+
+```sh
+cd browser-patcher
+npm run bank
+```
+
+The legacy import helper remains available for behavioural comparison with the
+preserved DS project:
 
 ```sh
 ./scripts/import-ds-sample-bank.sh
@@ -159,9 +173,11 @@ RomFS reads, no allocation, no CRC pass, and no full waveform scan: it only
 swaps a resident PCM pointer and copies 1.25 KiB of cached display data. This
 intentional departure from the DS one-sample policy prevents buffer starvation
 while preserving reverb state. The current nine-sample library uses about
-3.47 MiB of heap PCM. Source PCM remains signed 16-bit mono at 16.384 kHz for
-behavioural compatibility. Each grain uses a source/output-rate-correct Q16
-step and linear interpolation in the native 48 kHz stereo NDSP stream.
+10.15 MiB of heap PCM. Bundled source PCM is signed 16-bit mono at 48 kHz, while
+legacy 16.384 kHz replacement banks remain supported. Each grain uses a
+source/output-rate-correct Q16 step and linear interpolation in the native
+48 kHz stereo NDSP stream. Runtime Pan and Pan Deviation spatialize the mono
+grain voices independently.
 
 ## Standalone browser sample-bank patcher
 
@@ -170,9 +186,10 @@ is a self-contained offline editor. Open it directly from Finder or another
 file browser; it does not need a local server, installation, account, upload,
 or network connection.
 
-It can open an existing `NDSGRN01` bank or start from local audio, then preview,
-rename, trim, gain-adjust, reorder, and remove up to 64 samples. Exported audio
-is linearly resampled to 16.384 kHz signed mono PCM16 and written to a compact,
+It can open an existing 16.384 or 48 kHz `NDSGRN01` bank or start from local
+audio, then preview, rename, trim, gain-adjust, reorder, and remove up to 64
+samples. Exported audio is downmixed and converted with the same cached 32-tap
+windowed-sinc resampler to 48 kHz signed mono PCM16, then written to a compact,
 CRC-protected bank. Copy the downloaded file to:
 
 ```text
@@ -287,8 +304,9 @@ trails.
    `.3dsx` hardware test.
 3. **Complete baseline:** host audio tests, artifact validation, and interactive
    emulator launcher. Real-hardware acceptance remains manual by design.
-4. **Complete baseline:** DS bank loading, CRC validation, compact RomFS bank,
-   SD override policy, real waveform rendering, and 16.384-to-48 kHz audition.
+4. **Complete baseline:** legacy and native-rate bank loading, CRC validation,
+   compact RomFS bank, SD override policy, real waveform rendering, and native
+   48 kHz audition.
 5. **Complete baseline:** audio-clock granular scheduler with dry DS
    control parity, 48 kHz conversion, interpolation, and audio-origin markers.
    Granular playback is confirmed in Azahar.
@@ -296,8 +314,8 @@ trails.
    wet/dry, feedback, size, damping, and stereo HPF/LPF. Azahar listening
    acceptance is pending; real-hardware stability remains a separate gate.
 7. **In progress:** adjustable polyphony now raises the engine from the DS
-   baseline of four voices to 16. Resident sample capacity, rate,
-   interpolation quality, DSP headroom measurement, and physical old-model
-   acceptance remain.
+   baseline of four voices to 16, and the bundled originals now use high-quality
+   offline conversion to 48 kHz. Runtime interpolation quality, DSP headroom
+   measurement, and physical old-model acceptance remain.
 8. Port non-blocking UDP OSC on port 9000 using modern 3DS networking.
 9. Investigate camera-driven control only after the audio instrument is stable.

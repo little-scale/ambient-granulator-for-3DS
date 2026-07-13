@@ -24,12 +24,13 @@ are exercised by host tests.
 
 ## Native-rate conversion
 
-The bank remains 16.384 kHz signed 16-bit mono. NDSP runs at 48 kHz stereo.
-Grain positions use Q16 source indices; their step combines semitone and
-cent-resolution ratios with `source_rate / output_rate`, and samples are
-linearly interpolated. The cent ratio is calculated only when a grain launches,
-not per output sample. Timing intervals are calculated directly in 48 kHz
-output frames, so display refresh never controls launches.
+The bundled bank is 48 kHz signed 16-bit mono, while legacy 16.384 kHz
+`NDSGRN01` banks remain accepted. NDSP runs at 48 kHz stereo. Grain positions
+use Q16 source indices; their step combines semitone and cent-resolution ratios
+with `source_rate / output_rate`, and samples are linearly interpolated. The
+cent ratio is calculated only when a grain launches, not per output sample.
+Timing intervals are calculated directly in 48 kHz output frames, so display
+refresh never controls launches.
 
 The milestone-7 engine provides an adjustable 1–16 voice limit, defaulting to
 16. It fills idle slots first and, only when all allowed slots are occupied,

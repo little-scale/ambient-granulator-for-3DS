@@ -9,6 +9,7 @@
 #include <3ds.h>
 
 #include "audio_output.h"
+#include "build_info.h"
 #include "edit_repeat.h"
 #include "sample_bank.h"
 #include "sample_library.h"
@@ -335,6 +336,7 @@ static void draw_top_screen(const AppState *state, const AudioOutput *audio,
     snprintf(text, sizeof(text), "S%02d", parameters[PARAM_SAMPLE].value + 1);
     draw_text(8, TOP_ROW_OFFSET, text, false);
     draw_text(25, TOP_ROW_OFFSET, "VOICE", false);
+    draw_text(35, TOP_ROW_OFFSET, APP_BUILD_ID, false);
     draw_rule(0, TOP_ROW_OFFSET * CELL_HEIGHT + 7, 184);
     draw_rule(200, TOP_ROW_OFFSET * CELL_HEIGHT + 7, 184);
     draw_section_header(0, 8 + TOP_ROW_OFFSET, "CLOCK");

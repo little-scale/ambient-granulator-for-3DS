@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "bank": "node scripts/build-native-bank.mjs",
     "build": "node scripts/build-standalone.mjs",
     "test": "node scripts/build-standalone.mjs && node --test tests/*.test.mjs"
   }

@@ -10,7 +10,9 @@ The patcher can:
 - start with local audio or open an existing `NDSGRN01` `sample_bank.bin`;
 - decode multiple browser-supported audio files and downmix them to mono;
 - preview, rename, trim, gain-adjust, reorder, and remove samples;
-- linearly resample to signed PCM16 mono at 16.384 kHz;
+- downmix and convert to signed PCM16 mono at 48 kHz with a cached 32-tap
+  Blackman-windowed sinc resampler;
+- open legacy 16.384 kHz banks and upgrade them to 48 kHz on export;
 - CRC-check opened samples and CRC-protect every exported sample;
 - display the 16 MiB conservative capacity and 64-entry limit;
 - download a compact `sample_bank.bin` containing only used data.
@@ -34,3 +36,13 @@ install:
 npm test
 npm run build
 ```
+
+To rebuild the app's bundled bank from the ordered WAV files in the repository's
+local `samples/` directory:
+
+```sh
+npm run bank
+```
+
+The source WAVs stay local by default; the generated, rights-cleared
+`romfs/sample_bank.bin` is the distributable app asset.

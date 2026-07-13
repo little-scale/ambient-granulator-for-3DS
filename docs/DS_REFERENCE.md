@@ -66,9 +66,9 @@ input implementation and is treated as an interaction invariant.
 - The native port preloads all nine samples and cached waveforms before NDSP
   starts, then closes the bank file. This intentionally differs from the DS
   one-sample policy so live sample changes cannot starve audio buffers or
-  interrupt a frozen reverb. Source PCM stays signed 16-bit mono at 16.384 kHz
-  and is linearly resampled into the native 48 kHz stereo stream; later
-  scheduler and DSP coefficients use runtime sample rates.
+  interrupt a frozen reverb. The bundled bank uses 48 kHz signed 16-bit mono;
+  legacy 16.384 kHz banks remain supported, and the scheduler and DSP use the
+  runtime sample rate.
 - The dry four-voice scheduler is ported at 48 kHz with the DS burst,
   signed-range, pitch, timing, envelope, gain and pan semantics. Launch timing
   and visible markers originate in the audio renderer rather than VBlank.

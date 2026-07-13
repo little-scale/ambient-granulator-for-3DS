@@ -3,14 +3,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const [template, css, bank, app] = await Promise.all([
+const [template, css, bank, wav, app] = await Promise.all([
   readFile(resolve(project, "src/template.html"), "utf8"),
   readFile(resolve(project, "src/styles.css"), "utf8"),
   readFile(resolve(project, "src/bank.mjs"), "utf8"),
+  readFile(resolve(project, "src/wav.mjs"), "utf8"),
   readFile(resolve(project, "src/app.mjs"), "utf8"),
 ]);
 
-const javascript = `${bank}\n${app}`.replace(/<\/script/gi, "<\\/script");
+const javascript = `${bank}\n${wav}\n${app}`.replace(/<\/script/gi, "<\\/script");
 const output = template
   .replace("/*__PATCHER_CSS__*/", css)
   .replace("/*__PATCHER_JS__*/", javascript);

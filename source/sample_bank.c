@@ -9,7 +9,14 @@
 #define BANK_DATA_OFFSET (BANK_ENTRIES_OFFSET \
                           + BANK_ENTRY_SIZE * SAMPLE_BANK_MAX_ENTRIES)
 #define BANK_FORMAT_VERSION 1
-#define BANK_SAMPLE_RATE 16384
+#define BANK_LEGACY_SAMPLE_RATE 16384
+#define BANK_NATIVE_SAMPLE_RATE 48000
+
+static bool valid_sample_rate(uint32_t sample_rate)
+{
+    return sample_rate == BANK_LEGACY_SAMPLE_RATE
+        || sample_rate == BANK_NATIVE_SAMPLE_RATE;
+}
 
 static uint32_t read_u32_le(const uint8_t *bytes)
 {
@@ -80,7 +87,7 @@ bool sample_bank_open(SampleBank *bank, const char *path)
             || bank->used_bytes > bank->capacity
             || bank->sample_count < 1
             || bank->sample_count > SAMPLE_BANK_MAX_ENTRIES
-            || bank->sample_rate != BANK_SAMPLE_RATE
+            || !valid_sample_rate(bank->sample_rate)
             || read_u32_le(header + 28) != BANK_ENTRY_SIZE
             || read_u32_le(header + 32) != SAMPLE_BANK_MAX_ENTRIES
             || read_u32_le(header + 36) != BANK_DATA_OFFSET) {

@@ -216,7 +216,7 @@ code { color: var(--white); }
         <h1>3DS GRANULATOR BANK PATCHER</h1>
         <p>standalone · offline · audio stays on this device</p>
       </div>
-      <div class="format-stamp">PCM16 · MONO · 16384 HZ</div>
+      <div class="format-stamp">PCM16 · MONO · 48000 HZ</div>
     </header>
 
     <section class="workflow" aria-label="Sample bank workflow">
@@ -289,7 +289,8 @@ code { color: var(--white); }
   </main>
   <script type="module">export const BANK_MAGIC = "NDSGRN01";
 export const BANK_VERSION = 1;
-export const TARGET_RATE = 16384;
+export const LEGACY_RATE = 16384;
+export const TARGET_RATE = 48000;
 export const MAX_ENTRIES = 64;
 export const MAX_BANK_BYTES = 16 * 1024 * 1024;
 export const ENTRY_SIZE = 64;
@@ -299,6 +300,10 @@ export const DATA_OFFSET = ENTRIES_OFFSET + ENTRY_SIZE * MAX_ENTRIES;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8");
 let fallbackId = 0;
+const SUPPORTED_BANK_RATES = new Set([LEGACY_RATE, TARGET_RATE]);
+const RESAMPLE_RADIUS = 16;
+const RESAMPLE_PHASES = 1024;
+const resampleKernelCache = new Map();
 
 function createId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -354,37 +359,80 @@ export function makeSample({ name, sourceRate, data, origin = "LOCAL AUDIO" }) {
   };
 }
 
-export function resampleSample(sample) {
+function resampleKernel(sourceRate, targetRate) {
+  const key = `${sourceRate}:${targetRate}`;
+  if (resampleKernelCache.has(key)) return resampleKernelCache.get(key);
+  const taps = RESAMPLE_RADIUS * 2;
+  const cutoff = Math.min(1, targetRate / sourceRate);
+  const table = Array.from({ length: RESAMPLE_PHASES }, (_, phase) => {
+    const fraction = phase / (RESAMPLE_PHASES - 1);
+    const weights = new Float64Array(taps);
+    let total = 0;
+    for (let tap = 0; tap < taps; tap += 1) {
+      const distance = tap - (RESAMPLE_RADIUS - 1) - fraction;
+      const normalized = distance / RESAMPLE_RADIUS;
+      const window = Math.abs(normalized) < 1
+        ? .42 + .5 * Math.cos(Math.PI * normalized)
+          + .08 * Math.cos(2 * Math.PI * normalized) : 0;
+      const argument = Math.PI * distance * cutoff;
+      const sinc = argument === 0 ? 1 : Math.sin(argument) / argument;
+      weights[tap] = cutoff * sinc * window;
+      total += weights[tap];
+    }
+    for (let tap = 0; tap < taps; tap += 1) weights[tap] /= total;
+    return weights;
+  });
+  resampleKernelCache.set(key, table);
+  return table;
+}
+
+export function resampleSample(sample, targetRate = TARGET_RATE) {
   const start = Math.max(0, Math.min(sample.data.length - 1,
     Math.round(sample.trimStart)));
   const end = Math.max(start + 1, Math.min(sample.data.length,
     Math.round(sample.trimEnd)));
   const inputLength = end - start;
   const outputLength = Math.max(1,
-    Math.round(inputLength * TARGET_RATE / sample.sourceRate));
+    Math.round(inputLength * targetRate / sample.sourceRate));
   const output = new Float32Array(outputLength);
-  const ratio = sample.sourceRate / TARGET_RATE;
   const gain = Math.pow(10, sample.gainDb / 20);
+  if (sample.sourceRate === targetRate) {
+    for (let index = 0; index < outputLength; index += 1)
+      output[index] = Math.max(-1, Math.min(1, sample.data[start + index]
+        * gain));
+    return output;
+  }
+
+  const ratio = sample.sourceRate / targetRate;
+  const kernels = resampleKernel(sample.sourceRate, targetRate);
   for (let index = 0; index < outputLength; index += 1) {
     const position = Math.min(inputLength - 1, index * ratio);
-    const first = Math.floor(position);
-    const second = Math.min(first + 1, inputLength - 1);
-    const fraction = position - first;
-    const value = sample.data[start + first] * (1 - fraction)
-      + sample.data[start + second] * fraction;
+    const center = Math.floor(position);
+    const phase = Math.min(RESAMPLE_PHASES - 1,
+      Math.round((position - center) * (RESAMPLE_PHASES - 1)));
+    const weights = kernels[phase];
+    let value = 0;
+    let usedWeight = 0;
+    for (let tap = 0; tap < weights.length; tap += 1) {
+      const sourceIndex = center + tap - (RESAMPLE_RADIUS - 1);
+      if (sourceIndex < 0 || sourceIndex >= inputLength) continue;
+      value += sample.data[start + sourceIndex] * weights[tap];
+      usedWeight += weights[tap];
+    }
+    if (Math.abs(usedWeight) > 1e-12) value /= usedWeight;
     output[index] = Math.max(-1, Math.min(1, value * gain));
   }
   return output;
 }
 
-export function estimatedBankBytes(samples) {
+export function estimatedBankBytes(samples, targetRate = TARGET_RATE) {
   let cursor = DATA_OFFSET;
   for (const sample of samples) {
     cursor = (cursor + 31) & ~31;
     const inputLength = Math.max(1,
       Math.round(sample.trimEnd) - Math.round(sample.trimStart));
     cursor += Math.max(1,
-      Math.round(inputLength * TARGET_RATE / sample.sourceRate)) * 2;
+      Math.round(inputLength * targetRate / sample.sourceRate)) * 2;
   }
   return cursor;
 }
@@ -400,12 +448,16 @@ function pcmBytes(data) {
   return bytes;
 }
 
-export function buildBank(samples, maximumBytes = MAX_BANK_BYTES) {
+export function buildBank(samples, maximumBytes = MAX_BANK_BYTES,
+                          targetRate = TARGET_RATE) {
   if (!samples.length) throw new Error("Add at least one sample.");
   if (samples.length > MAX_ENTRIES)
     throw new Error(`A bank can contain at most ${MAX_ENTRIES} samples.`);
 
-  const prepared = samples.map(sample => pcmBytes(resampleSample(sample)));
+  if (!SUPPORTED_BANK_RATES.has(targetRate))
+    throw new Error(`Unsupported bank sample rate ${targetRate}.`);
+  const prepared = samples.map(sample => pcmBytes(
+    resampleSample(sample, targetRate)));
   const offsets = [];
   let cursor = DATA_OFFSET;
   for (const bytes of prepared) {
@@ -424,7 +476,7 @@ export function buildBank(samples, maximumBytes = MAX_BANK_BYTES) {
   writeU32(view, 12, output.length);
   writeU32(view, 16, samples.length);
   writeU32(view, 20, output.length);
-  writeU32(view, 24, TARGET_RATE);
+  writeU32(view, 24, targetRate);
   writeU32(view, 28, ENTRY_SIZE);
   writeU32(view, 32, MAX_ENTRIES);
   writeU32(view, 36, DATA_OFFSET);
@@ -456,7 +508,7 @@ export function decodeBank(input) {
   if (capacity < DATA_OFFSET || capacity > bytes.length
       || used < DATA_OFFSET || used > capacity
       || count < 1 || count > MAX_ENTRIES
-      || sampleRate !== TARGET_RATE
+      || !SUPPORTED_BANK_RATES.has(sampleRate)
       || readU32(bytes, 28) !== ENTRY_SIZE
       || readU32(bytes, 32) !== MAX_ENTRIES
       || readU32(bytes, 36) !== DATA_OFFSET)
@@ -494,6 +546,101 @@ export function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function fourCc(bytes, offset) {
+  return String.fromCharCode(bytes[offset], bytes[offset + 1],
+    bytes[offset + 2], bytes[offset + 3]);
+}
+
+function readInt24(view, offset) {
+  let value = view.getUint8(offset)
+    | (view.getUint8(offset + 1) << 8)
+    | (view.getUint8(offset + 2) << 16);
+  if (value & 0x800000) value -= 0x1000000;
+  return value;
+}
+
+export function decodePcmWav(input) {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  if (bytes.length < 44 || fourCc(bytes, 0) !== "RIFF"
+      || fourCc(bytes, 8) !== "WAVE")
+    throw new Error("File is not a RIFF/WAVE audio file.");
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let format = null;
+  let dataOffset = -1;
+  let dataLength = 0;
+  for (let offset = 12; offset + 8 <= bytes.length;) {
+    const id = fourCc(bytes, offset);
+    const length = view.getUint32(offset + 4, true);
+    const payload = offset + 8;
+    if (payload + length > bytes.length)
+      throw new Error(`WAV ${id} chunk extends beyond the file.`);
+    if (id === "fmt ") {
+      if (length < 16) throw new Error("WAV format chunk is incomplete.");
+      let encoding = view.getUint16(payload, true);
+      const channels = view.getUint16(payload + 2, true);
+      const sampleRate = view.getUint32(payload + 4, true);
+      const blockAlign = view.getUint16(payload + 12, true);
+      const bitsPerSample = view.getUint16(payload + 14, true);
+      if (encoding === 0xfffe && length >= 40)
+        encoding = view.getUint16(payload + 24, true);
+      format = { encoding, channels, sampleRate, blockAlign, bitsPerSample };
+    } else if (id === "data") {
+      dataOffset = payload;
+      dataLength = length;
+    }
+    offset = payload + length + (length & 1);
+  }
+
+  if (!format || dataOffset < 0)
+    throw new Error("WAV file has no usable format or data chunk.");
+  if (format.encoding !== 1 || format.channels < 1 || format.channels > 8
+      || ![16, 24].includes(format.bitsPerSample)
+      || format.sampleRate < 8000 || format.sampleRate > 192000) {
+    throw new Error("Only 16-bit or 24-bit integer PCM WAV audio is supported.");
+  }
+  const bytesPerSample = format.bitsPerSample / 8;
+  if (format.blockAlign < format.channels * bytesPerSample)
+    throw new Error("WAV block alignment is invalid.");
+
+  const frames = Math.floor(dataLength / format.blockAlign);
+  if (frames < 1) throw new Error("WAV file contains no complete audio frames.");
+  const data = new Float32Array(frames);
+  let stereoEnergy = 0;
+  let differenceEnergy = 0;
+  for (let frame = 0; frame < frames; frame += 1) {
+    const base = dataOffset + frame * format.blockAlign;
+    let sum = 0;
+    let left = 0;
+    let right = 0;
+    for (let channel = 0; channel < format.channels; channel += 1) {
+      const offset = base + channel * bytesPerSample;
+      const value = format.bitsPerSample === 16
+        ? view.getInt16(offset, true) / 32768
+        : readInt24(view, offset) / 8388608;
+      if (channel === 0) left = value;
+      if (channel === 1) right = value;
+      sum += value;
+    }
+    data[frame] = sum / format.channels;
+    if (format.channels >= 2) {
+      stereoEnergy += (left * left + right * right) * .5;
+      const difference = left - right;
+      differenceEnergy += difference * difference * .5;
+    }
+  }
+  const stereoDifferenceDb = format.channels >= 2 && stereoEnergy > 0
+    ? 10 * Math.log10(Math.max(Number.EPSILON,
+      differenceEnergy / stereoEnergy)) : null;
+  return {
+    data,
+    sourceRate: format.sampleRate,
+    channels: format.channels,
+    bitsPerSample: format.bitsPerSample,
+    stereoDifferenceDb,
+  };
 }
 
 const elements = {
@@ -704,7 +851,9 @@ async function openBank(file) {
     samples = decoded.samples;
     selectedId = samples[0]?.id ?? null;
     render();
-    setStatus(`Opened ${file.name}: ${samples.length} samples, ${formatBytes(decoded.used)}.`, "success");
+    const conversion = decoded.sampleRate === TARGET_RATE ? ""
+      : ` Legacy ${decoded.sampleRate} Hz audio will be upgraded on export.`;
+    setStatus(`Opened ${file.name}: ${samples.length} samples, ${formatBytes(decoded.used)}, ${decoded.sampleRate} Hz.${conversion}`, "success");
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   }
@@ -724,17 +873,31 @@ async function addAudio(files) {
   try {
     const added = [];
     for (const file of incoming) {
-      const buffer = await context().decodeAudioData(
-        (await file.arrayBuffer()).slice(0));
-      const data = new Float32Array(buffer.length);
-      for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-        const channelData = buffer.getChannelData(channel);
-        for (let frame = 0; frame < data.length; frame += 1)
-          data[frame] += channelData[frame] / buffer.numberOfChannels;
+      const encoded = await file.arrayBuffer();
+      let data;
+      let sourceRate;
+      if (/\.wav$/i.test(file.name)) {
+        try {
+          const decoded = decodePcmWav(new Uint8Array(encoded));
+          data = decoded.data;
+          sourceRate = decoded.sourceRate;
+        } catch {
+          // Let the browser handle valid WAV encodings beyond integer PCM.
+        }
+      }
+      if (!data) {
+        const buffer = await context().decodeAudioData(encoded.slice(0));
+        data = new Float32Array(buffer.length);
+        sourceRate = buffer.sampleRate;
+        for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+          const channelData = buffer.getChannelData(channel);
+          for (let frame = 0; frame < data.length; frame += 1)
+            data[frame] += channelData[frame] / buffer.numberOfChannels;
+        }
       }
       added.push(makeSample({
         name: file.name.replace(/\.[^.]+$/, ""),
-        sourceRate: buffer.sampleRate,
+        sourceRate,
         data,
         origin: file.name,
       }));
@@ -742,7 +905,7 @@ async function addAudio(files) {
     samples.push(...added);
     selectedId = added[0]?.id ?? selectedId;
     render();
-    setStatus(`Added ${added.length} sample${added.length === 1 ? "" : "s"}.`, "success");
+    setStatus(`Added ${added.length} sample${added.length === 1 ? "" : "s"}. Export is 48 kHz mono PCM16.`, "success");
   } catch (error) {
     setStatus(`Audio decode failed: ${error instanceof Error ? error.message : String(error)}`, "error");
   }
@@ -757,7 +920,7 @@ function exportBank() {
     link.download = "sample_bank.bin";
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-    setStatus(`Built ${samples.length} samples into ${formatBytes(output.length)}. Copy sample_bank.bin to /3ds/3ds-granulator/ on the SD card.`, "success");
+    setStatus(`Built ${samples.length} samples into ${formatBytes(output.length)} at 48 kHz mono PCM16. Copy sample_bank.bin to /3ds/3ds-granulator/ on the SD card.`, "success");
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   }

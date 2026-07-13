@@ -1,6 +1,7 @@
 export const BANK_MAGIC = "NDSGRN01";
 export const BANK_VERSION = 1;
-export const TARGET_RATE = 16384;
+export const LEGACY_RATE = 16384;
+export const TARGET_RATE = 48000;
 export const MAX_ENTRIES = 64;
 export const MAX_BANK_BYTES = 16 * 1024 * 1024;
 export const ENTRY_SIZE = 64;
@@ -10,6 +11,10 @@ export const DATA_OFFSET = ENTRIES_OFFSET + ENTRY_SIZE * MAX_ENTRIES;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8");
 let fallbackId = 0;
+const SUPPORTED_BANK_RATES = new Set([LEGACY_RATE, TARGET_RATE]);
+const RESAMPLE_RADIUS = 16;
+const RESAMPLE_PHASES = 1024;
+const resampleKernelCache = new Map();
 
 function createId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -65,37 +70,80 @@ export function makeSample({ name, sourceRate, data, origin = "LOCAL AUDIO" }) {
   };
 }
 
-export function resampleSample(sample) {
+function resampleKernel(sourceRate, targetRate) {
+  const key = `${sourceRate}:${targetRate}`;
+  if (resampleKernelCache.has(key)) return resampleKernelCache.get(key);
+  const taps = RESAMPLE_RADIUS * 2;
+  const cutoff = Math.min(1, targetRate / sourceRate);
+  const table = Array.from({ length: RESAMPLE_PHASES }, (_, phase) => {
+    const fraction = phase / (RESAMPLE_PHASES - 1);
+    const weights = new Float64Array(taps);
+    let total = 0;
+    for (let tap = 0; tap < taps; tap += 1) {
+      const distance = tap - (RESAMPLE_RADIUS - 1) - fraction;
+      const normalized = distance / RESAMPLE_RADIUS;
+      const window = Math.abs(normalized) < 1
+        ? .42 + .5 * Math.cos(Math.PI * normalized)
+          + .08 * Math.cos(2 * Math.PI * normalized) : 0;
+      const argument = Math.PI * distance * cutoff;
+      const sinc = argument === 0 ? 1 : Math.sin(argument) / argument;
+      weights[tap] = cutoff * sinc * window;
+      total += weights[tap];
+    }
+    for (let tap = 0; tap < taps; tap += 1) weights[tap] /= total;
+    return weights;
+  });
+  resampleKernelCache.set(key, table);
+  return table;
+}
+
+export function resampleSample(sample, targetRate = TARGET_RATE) {
   const start = Math.max(0, Math.min(sample.data.length - 1,
     Math.round(sample.trimStart)));
   const end = Math.max(start + 1, Math.min(sample.data.length,
     Math.round(sample.trimEnd)));
   const inputLength = end - start;
   const outputLength = Math.max(1,
-    Math.round(inputLength * TARGET_RATE / sample.sourceRate));
+    Math.round(inputLength * targetRate / sample.sourceRate));
   const output = new Float32Array(outputLength);
-  const ratio = sample.sourceRate / TARGET_RATE;
   const gain = Math.pow(10, sample.gainDb / 20);
+  if (sample.sourceRate === targetRate) {
+    for (let index = 0; index < outputLength; index += 1)
+      output[index] = Math.max(-1, Math.min(1, sample.data[start + index]
+        * gain));
+    return output;
+  }
+
+  const ratio = sample.sourceRate / targetRate;
+  const kernels = resampleKernel(sample.sourceRate, targetRate);
   for (let index = 0; index < outputLength; index += 1) {
     const position = Math.min(inputLength - 1, index * ratio);
-    const first = Math.floor(position);
-    const second = Math.min(first + 1, inputLength - 1);
-    const fraction = position - first;
-    const value = sample.data[start + first] * (1 - fraction)
-      + sample.data[start + second] * fraction;
+    const center = Math.floor(position);
+    const phase = Math.min(RESAMPLE_PHASES - 1,
+      Math.round((position - center) * (RESAMPLE_PHASES - 1)));
+    const weights = kernels[phase];
+    let value = 0;
+    let usedWeight = 0;
+    for (let tap = 0; tap < weights.length; tap += 1) {
+      const sourceIndex = center + tap - (RESAMPLE_RADIUS - 1);
+      if (sourceIndex < 0 || sourceIndex >= inputLength) continue;
+      value += sample.data[start + sourceIndex] * weights[tap];
+      usedWeight += weights[tap];
+    }
+    if (Math.abs(usedWeight) > 1e-12) value /= usedWeight;
     output[index] = Math.max(-1, Math.min(1, value * gain));
   }
   return output;
 }
 
-export function estimatedBankBytes(samples) {
+export function estimatedBankBytes(samples, targetRate = TARGET_RATE) {
   let cursor = DATA_OFFSET;
   for (const sample of samples) {
     cursor = (cursor + 31) & ~31;
     const inputLength = Math.max(1,
       Math.round(sample.trimEnd) - Math.round(sample.trimStart));
     cursor += Math.max(1,
-      Math.round(inputLength * TARGET_RATE / sample.sourceRate)) * 2;
+      Math.round(inputLength * targetRate / sample.sourceRate)) * 2;
   }
   return cursor;
 }
@@ -111,12 +159,16 @@ function pcmBytes(data) {
   return bytes;
 }
 
-export function buildBank(samples, maximumBytes = MAX_BANK_BYTES) {
+export function buildBank(samples, maximumBytes = MAX_BANK_BYTES,
+                          targetRate = TARGET_RATE) {
   if (!samples.length) throw new Error("Add at least one sample.");
   if (samples.length > MAX_ENTRIES)
     throw new Error(`A bank can contain at most ${MAX_ENTRIES} samples.`);
 
-  const prepared = samples.map(sample => pcmBytes(resampleSample(sample)));
+  if (!SUPPORTED_BANK_RATES.has(targetRate))
+    throw new Error(`Unsupported bank sample rate ${targetRate}.`);
+  const prepared = samples.map(sample => pcmBytes(
+    resampleSample(sample, targetRate)));
   const offsets = [];
   let cursor = DATA_OFFSET;
   for (const bytes of prepared) {
@@ -135,7 +187,7 @@ export function buildBank(samples, maximumBytes = MAX_BANK_BYTES) {
   writeU32(view, 12, output.length);
   writeU32(view, 16, samples.length);
   writeU32(view, 20, output.length);
-  writeU32(view, 24, TARGET_RATE);
+  writeU32(view, 24, targetRate);
   writeU32(view, 28, ENTRY_SIZE);
   writeU32(view, 32, MAX_ENTRIES);
   writeU32(view, 36, DATA_OFFSET);
@@ -167,7 +219,7 @@ export function decodeBank(input) {
   if (capacity < DATA_OFFSET || capacity > bytes.length
       || used < DATA_OFFSET || used > capacity
       || count < 1 || count > MAX_ENTRIES
-      || sampleRate !== TARGET_RATE
+      || !SUPPORTED_BANK_RATES.has(sampleRate)
       || readU32(bytes, 28) !== ENTRY_SIZE
       || readU32(bytes, 32) !== MAX_ENTRIES
       || readU32(bytes, 36) !== DATA_OFFSET)

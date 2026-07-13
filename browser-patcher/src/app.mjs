@@ -206,7 +206,9 @@ async function openBank(file) {
     samples = decoded.samples;
     selectedId = samples[0]?.id ?? null;
     render();
-    setStatus(`Opened ${file.name}: ${samples.length} samples, ${formatBytes(decoded.used)}.`, "success");
+    const conversion = decoded.sampleRate === TARGET_RATE ? ""
+      : ` Legacy ${decoded.sampleRate} Hz audio will be upgraded on export.`;
+    setStatus(`Opened ${file.name}: ${samples.length} samples, ${formatBytes(decoded.used)}, ${decoded.sampleRate} Hz.${conversion}`, "success");
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   }
@@ -226,17 +228,31 @@ async function addAudio(files) {
   try {
     const added = [];
     for (const file of incoming) {
-      const buffer = await context().decodeAudioData(
-        (await file.arrayBuffer()).slice(0));
-      const data = new Float32Array(buffer.length);
-      for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-        const channelData = buffer.getChannelData(channel);
-        for (let frame = 0; frame < data.length; frame += 1)
-          data[frame] += channelData[frame] / buffer.numberOfChannels;
+      const encoded = await file.arrayBuffer();
+      let data;
+      let sourceRate;
+      if (/\.wav$/i.test(file.name)) {
+        try {
+          const decoded = decodePcmWav(new Uint8Array(encoded));
+          data = decoded.data;
+          sourceRate = decoded.sourceRate;
+        } catch {
+          // Let the browser handle valid WAV encodings beyond integer PCM.
+        }
+      }
+      if (!data) {
+        const buffer = await context().decodeAudioData(encoded.slice(0));
+        data = new Float32Array(buffer.length);
+        sourceRate = buffer.sampleRate;
+        for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+          const channelData = buffer.getChannelData(channel);
+          for (let frame = 0; frame < data.length; frame += 1)
+            data[frame] += channelData[frame] / buffer.numberOfChannels;
+        }
       }
       added.push(makeSample({
         name: file.name.replace(/\.[^.]+$/, ""),
-        sourceRate: buffer.sampleRate,
+        sourceRate,
         data,
         origin: file.name,
       }));
@@ -244,7 +260,7 @@ async function addAudio(files) {
     samples.push(...added);
     selectedId = added[0]?.id ?? selectedId;
     render();
-    setStatus(`Added ${added.length} sample${added.length === 1 ? "" : "s"}.`, "success");
+    setStatus(`Added ${added.length} sample${added.length === 1 ? "" : "s"}. Export is 48 kHz mono PCM16.`, "success");
   } catch (error) {
     setStatus(`Audio decode failed: ${error instanceof Error ? error.message : String(error)}`, "error");
   }
@@ -259,7 +275,7 @@ function exportBank() {
     link.download = "sample_bank.bin";
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-    setStatus(`Built ${samples.length} samples into ${formatBytes(output.length)}. Copy sample_bank.bin to /3ds/3ds-granulator/ on the SD card.`, "success");
+    setStatus(`Built ${samples.length} samples into ${formatBytes(output.length)} at 48 kHz mono PCM16. Copy sample_bank.bin to /3ds/3ds-granulator/ on the SD card.`, "success");
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   }
