@@ -1,8 +1,8 @@
 # DS reference contract
 
-The source project at `/Users/a1106632/Documents/nds-locked-granulator ` was
-inspected before choosing the 3DS architecture. Its trailing space is
-intentional. The source tree and ROM remain untouched.
+The preserved sibling project `nds-locked-granulator ` was inspected before
+choosing the 3DS architecture. Its trailing space is intentional. The source
+tree and ROM remain untouched.
 
 ## Behaviour that must survive the port
 

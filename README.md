@@ -1,9 +1,9 @@
 # Ambient Granulator for 3DS
 
 Native Nintendo 3DS/2DS homebrew port of the working Nintendo DS Touch
-Granulator. This is a separate project; the DS source and tested ROM in
-`/Users/a1106632/Documents/nds-locked-granulator ` are used only as a behavioural
-and visual reference.
+Granulator. This is a separate project; the preserved sibling
+`nds-locked-granulator ` source project and tested ROM are used only as a
+behavioural and visual reference.
 
 The Homebrew Launcher menu title is **Ambient Granulator for 3DS**. The
 `3ds_granulator.3dsx` filename and `/3ds/3ds-granulator/` installation path are
