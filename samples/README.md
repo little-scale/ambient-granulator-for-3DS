@@ -14,6 +14,7 @@ PCM16 bank at `romfs/sample_bank.bin` is the distributable application asset.
 7. `110bpm F - 01 - Hiskee Vocalpack.wav`
 8. `130bpm Am - 05 - Hiskee Vocalpack.wav`
 9. `sample1.wav`
+10. `piano.wav`
 
 Stereo input is intentionally averaged to mono. The native granular engine
 spatializes each grain at runtime with Pan and Pan Deviation.

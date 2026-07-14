@@ -9,6 +9,7 @@ import {
   decodeBank,
   formatBytes,
   makeSample,
+  resampleSample,
 } from "../src/bank.mjs";
 import { decodePcmWav } from "../src/wav.mjs";
 
@@ -27,7 +28,10 @@ const order = [
   "110bpm F - 01 - Hiskee Vocalpack.wav",
   "130bpm Am - 05 - Hiskee Vocalpack.wav",
   "sample1.wav",
+  "piano.wav",
 ];
+const TARGET_PEAK_DBFS = -1.0;
+const TARGET_PEAK = 10 ** (TARGET_PEAK_DBFS / 20);
 
 const samples = [];
 for (const filename of order) {
@@ -42,6 +46,19 @@ for (const filename of order) {
   const difference = decoded.stereoDifferenceDb === null ? "MONO"
     : `${decoded.stereoDifferenceDb.toFixed(1)} DB L-R`;
   console.log(`${filename}: ${decoded.sourceRate} Hz, ${decoded.bitsPerSample}-bit, ${decoded.channels} ch -> mono; ${difference}`);
+}
+
+for (const sample of samples) {
+  const preview = resampleSample(sample, TARGET_RATE);
+  let peak = 0;
+  for (const value of preview) peak = Math.max(peak, Math.abs(value));
+  if (peak === 0) {
+    console.log(`${sample.origin}: silent after conversion; normalization skipped`);
+    continue;
+  }
+  const adjustmentDb = 20 * Math.log10(TARGET_PEAK / peak);
+  sample.gainDb += adjustmentDb;
+  console.log(`${sample.origin}: final mono normalization ${adjustmentDb >= 0 ? "+" : ""}${adjustmentDb.toFixed(2)} dB -> ${TARGET_PEAK_DBFS.toFixed(1)} dBFS`);
 }
 
 const bank = buildBank(samples);

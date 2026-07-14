@@ -1,5 +1,6 @@
 #include "effects_chain.h"
 #include "granular_engine.h"
+#include "ram_sample.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -12,6 +13,7 @@
 
 static int16_t sample_a[SWITCH_SAMPLE_COUNT];
 static int16_t sample_b[SWITCH_SAMPLE_COUNT];
+static int16_t recording[1024];
 static int16_t output[SWITCH_TEST_FRAMES * 2];
 static int32_t mix_output[SWITCH_TEST_FRAMES * 2];
 
@@ -30,6 +32,8 @@ int main(void)
         sample_a[index] = (int16_t)(12000 - (index & 255));
         sample_b[index] = (int16_t)(-9000 + (index & 127));
     }
+    for (int index = 0; index < 1024; index++)
+        recording[index] = (int16_t)(index * 12 - 6000);
 
     GranularConfig grains = {
         .center_x = 64,
@@ -68,6 +72,7 @@ int main(void)
 
     GranularEngine engine;
     EffectsChain chain;
+    RamSample ram_sample = { 0 };
     granular_engine_init(&engine);
     granular_engine_set_sample(&engine, sample_a, SWITCH_SAMPLE_COUNT, 16384);
     assert(effects_chain_init(&chain));
@@ -79,7 +84,13 @@ int main(void)
     assert(buffer_has_audio(output, SWITCH_TEST_FRAMES));
 
     effects.freeze = true;
-    granular_engine_set_sample(&engine, sample_b, SWITCH_SAMPLE_COUNT, 16384);
+    assert(ram_sample_clone(&ram_sample, sample_b,
+                            SWITCH_SAMPLE_COUNT, 16384));
+    assert(ram_sample_punch_in(&ram_sample, 4096, recording, 1024, 32728)
+           > 0);
+    granular_engine_set_sample(&engine, ram_sample.samples,
+                               ram_sample.sample_count,
+                               ram_sample.sample_rate);
     memset(output, 0, sizeof(output));
     memset(mix_output, 0, sizeof(mix_output));
     effects_chain_process_wide(&chain, mix_output, output,
@@ -93,6 +104,7 @@ int main(void)
     effects_chain_process_wide(&chain, mix_output, output,
                                SWITCH_TEST_FRAMES, &effects);
     assert(buffer_has_audio(output, SWITCH_TEST_FRAMES));
+    ram_sample_free(&ram_sample);
     effects_chain_exit(&chain);
     puts("live_sample_switch_test: all checks passed");
     return 0;

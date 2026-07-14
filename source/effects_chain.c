@@ -6,8 +6,7 @@
 #include <string.h>
 
 #define DS_EFFECTS_SAMPLE_RATE 16384
-#define SOFT_LIMIT_KNEE 30000
-#define SOFT_LIMIT_RANGE (INT16_MAX - SOFT_LIMIT_KNEE)
+#define INTERNAL_SOFT_LIMIT_KNEE 30000
 
 static int clamp_int(int value, int minimum, int maximum)
 {
@@ -27,20 +26,21 @@ static int16_t clamp_sample(int64_t value)
     return (int16_t)value;
 }
 
-static int16_t soft_limit_sample(int64_t value, bool *overloaded)
+static int16_t soft_limit_sample(int64_t value, int knee,
+                                 bool *overloaded)
 {
+    int range = INT16_MAX - knee;
     bool negative = value < 0;
     uint64_t magnitude = negative
         ? (uint64_t)(-(value + 1)) + 1 : (uint64_t)value;
     if (value < INT16_MIN || value > INT16_MAX)
         *overloaded = true;
-    if (magnitude <= SOFT_LIMIT_KNEE)
+    if (magnitude <= (uint64_t)knee)
         return (int16_t)value;
 
-    uint64_t excess = magnitude - SOFT_LIMIT_KNEE;
-    uint64_t compressed = SOFT_LIMIT_KNEE
-        + (uint64_t)SOFT_LIMIT_RANGE * excess
-        / (excess + SOFT_LIMIT_RANGE);
+    uint64_t excess = magnitude - (uint64_t)knee;
+    uint64_t compressed = (uint64_t)knee
+        + (uint64_t)range * excess / (excess + (uint64_t)range);
     if (compressed > INT16_MAX)
         compressed = INT16_MAX;
     return (int16_t)(negative ? -(int64_t)compressed
@@ -50,7 +50,8 @@ static int16_t soft_limit_sample(int64_t value, bool *overloaded)
 static int32_t limit_input(EffectsChain *chain, int64_t value)
 {
     bool overloaded = false;
-    int16_t limited = soft_limit_sample(value, &overloaded);
+    int16_t limited = soft_limit_sample(
+        value, INTERNAL_SOFT_LIMIT_KNEE, &overloaded);
     if (overloaded) {
         chain->block_overloaded = true;
         chain->input_overload_events++;
@@ -70,10 +71,23 @@ static int32_t limit_fdn(EffectsChain *chain, int64_t value, bool freeze)
     }
 
     bool overloaded = false;
-    int16_t limited = soft_limit_sample(value, &overloaded);
+    int16_t limited = soft_limit_sample(
+        value, INTERNAL_SOFT_LIMIT_KNEE, &overloaded);
     if (overloaded) {
         chain->block_overloaded = true;
         chain->fdn_overload_events++;
+    }
+    return limited;
+}
+
+static int16_t limit_output(EffectsChain *chain, int64_t value)
+{
+    bool overloaded = false;
+    int16_t limited = soft_limit_sample(
+        value, EFFECTS_OUTPUT_SOFT_CLIP_KNEE, &overloaded);
+    if (overloaded) {
+        chain->block_overloaded = true;
+        chain->output_overload_events++;
     }
     return limited;
 }
@@ -249,6 +263,7 @@ void effects_chain_reset(EffectsChain *chain)
     memset(chain->filters, 0, sizeof(chain->filters));
     chain->input_overload_events = 0;
     chain->fdn_overload_events = 0;
+    chain->output_overload_events = 0;
     chain->block_overloaded = false;
 }
 
@@ -334,10 +349,8 @@ static void process(EffectsChain *chain, const int16_t *narrow_input,
                                     chain, config);
         mixed_right = process_filter(&chain->filters[1], mixed_right,
                                      chain, config);
-        output[frame * 2] = (int16_t)limit_fdn(
-            chain, mixed_left, config->freeze);
-        output[frame * 2 + 1] = (int16_t)limit_fdn(
-            chain, mixed_right, config->freeze);
+        output[frame * 2] = limit_output(chain, mixed_left);
+        output[frame * 2 + 1] = limit_output(chain, mixed_right);
     }
 }
 

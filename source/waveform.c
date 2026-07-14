@@ -2,10 +2,12 @@
 
 #include <limits.h>
 
-void waveform_analyze(const int16_t *samples, uint32_t sample_count,
-                      int16_t *minimum, int16_t *maximum, size_t columns)
+static void analyze_columns(const int16_t *samples, uint32_t sample_count,
+                            int16_t *minimum, int16_t *maximum,
+                            size_t columns, size_t first_column,
+                            size_t end_column)
 {
-    for (size_t x = 0; x < columns; x++) {
+    for (size_t x = first_column; x < end_column; x++) {
         if (samples == NULL || sample_count == 0) {
             minimum[x] = 0;
             maximum[x] = 0;
@@ -31,4 +33,32 @@ void waveform_analyze(const int16_t *samples, uint32_t sample_count,
         minimum[x] = low;
         maximum[x] = high;
     }
+}
+
+void waveform_analyze(const int16_t *samples, uint32_t sample_count,
+                      int16_t *minimum, int16_t *maximum, size_t columns)
+{
+    analyze_columns(samples, sample_count, minimum, maximum,
+                    columns, 0, columns);
+}
+
+void waveform_analyze_changed(const int16_t *samples, uint32_t sample_count,
+                              int16_t *minimum, int16_t *maximum,
+                              size_t columns, uint32_t changed_first,
+                              uint32_t changed_count)
+{
+    if (samples == NULL || sample_count == 0 || columns == 0
+            || changed_count == 0 || changed_first >= sample_count)
+        return;
+    uint64_t changed_end = (uint64_t)changed_first + changed_count;
+    if (changed_end > sample_count)
+        changed_end = sample_count;
+    size_t first_column = (size_t)((((uint64_t)changed_first + 1) * columns
+                                   - 1) / sample_count);
+    size_t last_column = (size_t)((changed_end * columns - 1)
+                                 / sample_count);
+    if (last_column >= columns)
+        last_column = columns - 1;
+    analyze_columns(samples, sample_count, minimum, maximum,
+                    columns, first_column, last_column + 1);
 }

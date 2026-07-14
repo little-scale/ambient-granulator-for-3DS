@@ -126,6 +126,48 @@ static void test_sync_and_gate_repetition(void)
     assert(marker.frame == 12000);
 }
 
+static void test_gate_release_cancels_unstarted_repeat(void)
+{
+    GranularEngine engine;
+    GranularConfig config = default_config();
+    config.grain_count = 1;
+    config.gate = true;
+    reset_engine(&engine);
+    granular_engine_render(&engine, output, 1, &config);
+
+    GranularMarker marker;
+    assert(granular_engine_pop_marker(&engine, &marker));
+    assert(marker.frame == 0);
+    assert(engine.gate_repeat_pending);
+
+    config.gate = false;
+    granular_engine_render(&engine, output, 2000, &config);
+    assert(!engine.gate_repeat_pending);
+    assert(engine.grains_launched == 1);
+    assert(!granular_engine_pop_marker(&engine, &marker));
+}
+
+static void test_gate_release_finishes_current_burst(void)
+{
+    GranularEngine engine;
+    GranularConfig config = default_config();
+    config.grain_count = 4;
+    config.gate = true;
+    reset_engine(&engine);
+    granular_engine_render(&engine, output, 1, &config);
+
+    config.gate = false;
+    granular_engine_render(&engine, output, 2000, &config);
+    const uint64_t expected[] = { 0, 480, 960, 1440 };
+    GranularMarker marker;
+    for (int index = 0; index < 4; index++) {
+        assert(granular_engine_pop_marker(&engine, &marker));
+        assert(marker.frame == expected[index]);
+    }
+    assert(engine.grains_launched == 4);
+    assert(!granular_engine_pop_marker(&engine, &marker));
+}
+
 static void test_range_modes(void)
 {
     GranularEngine engine;
@@ -208,6 +250,75 @@ static void test_polyphony_limit(void)
     assert(granular_engine_active_voices(&engine) == 4);
 }
 
+static void test_stop_preserves_source_and_clock(void)
+{
+    GranularEngine engine;
+    GranularConfig config = default_config();
+    reset_engine(&engine);
+    granular_engine_trigger(&engine, 160, 4);
+    granular_engine_render(&engine, output, 64, &config);
+    const int16_t *source = engine.sample;
+    uint32_t sample_count = engine.sample_count;
+    uint32_t source_rate = engine.source_rate;
+    uint64_t rendered_frames = engine.rendered_frames;
+    granular_engine_stop(&engine);
+    assert(granular_engine_active_voices(&engine) == 0);
+    assert(engine.tails[0].voice.active);
+    assert(engine.tails[0].frames_remaining == GRANULAR_DECLICK_FRAMES);
+    assert(engine.burst_remaining == 0);
+    assert(engine.sample == source);
+    assert(engine.sample_count == sample_count);
+    assert(engine.source_rate == source_rate);
+    assert(engine.rendered_frames == rendered_frames);
+}
+
+static void test_minimum_declick_envelope(void)
+{
+    GranularEngine engine;
+    GranularConfig config = default_config();
+    config.grain_count = 1;
+    config.length_ms = 500;
+    config.attack_percent = 0;
+    config.release_percent = 0;
+    reset_engine(&engine);
+    granular_engine_trigger(&engine, 160, 1);
+    granular_engine_render(&engine, output, GRANULAR_DECLICK_FRAMES, &config);
+
+    assert(output[0] == 0);
+    assert(output[1] == 0);
+    assert(output[(GRANULAR_DECLICK_FRAMES - 1) * 2] != 0);
+    assert(engine.voices[0].age_frames == GRANULAR_DECLICK_FRAMES);
+}
+
+static void test_voice_steal_and_stop_are_declicked(void)
+{
+    GranularEngine engine;
+    GranularConfig config = default_config();
+    config.grain_count = 1;
+    config.voice_limit = 1;
+    config.length_ms = 500;
+    config.attack_percent = 0;
+    config.release_percent = 0;
+    reset_engine(&engine);
+    granular_engine_trigger(&engine, 160, 1);
+    granular_engine_render(&engine, output, GRANULAR_DECLICK_FRAMES, &config);
+    int before_steal = output[(GRANULAR_DECLICK_FRAMES - 1) * 2];
+
+    granular_engine_trigger(&engine, 160, 1);
+    granular_engine_render(&engine, output, 1, &config);
+    assert(engine.tails[0].voice.active);
+    assert(engine.tails[0].frames_remaining == GRANULAR_DECLICK_FRAMES - 1);
+    int steal_delta = output[0] - before_steal;
+    assert(steal_delta >= -2 && steal_delta <= 2);
+
+    granular_engine_stop(&engine);
+    assert(granular_engine_active_voices(&engine) == 0);
+    granular_engine_render(&engine, output, GRANULAR_DECLICK_FRAMES, &config);
+    assert(output[(GRANULAR_DECLICK_FRAMES - 1) * 2] == 0);
+    for (int index = 0; index < GRANULAR_TAIL_COUNT; index++)
+        assert(!engine.tails[index].voice.active);
+}
+
 static void test_wide_mix_preserves_overload_headroom(void)
 {
     GranularEngine narrow;
@@ -285,9 +396,14 @@ int main(void)
     test_fine_tuning();
     test_sample_clock_burst();
     test_sync_and_gate_repetition();
+    test_gate_release_cancels_unstarted_repeat();
+    test_gate_release_finishes_current_burst();
     test_range_modes();
     test_audio_pan_and_envelope();
     test_polyphony_limit();
+    test_stop_preserves_source_and_clock();
+    test_minimum_declick_envelope();
+    test_voice_steal_and_stop_are_declicked();
     test_wide_mix_preserves_overload_headroom();
     test_silent_render_preserves_engine_timing();
     puts("granular_engine_test: all checks passed");

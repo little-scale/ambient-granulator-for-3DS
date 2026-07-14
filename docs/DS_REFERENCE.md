@@ -63,7 +63,7 @@ input implementation and is treated as an interaction invariant.
   16 MiB DS-ROM reservation is compacted to the used length for 3DS RomFS, with
   PCM and entry CRCs unchanged. An SD bank at
   `/3ds/3ds-granulator/sample_bank.bin` overrides the embedded bank.
-- The native port preloads all nine samples and cached waveforms before NDSP
+- The native port preloads all ten samples and cached waveforms before NDSP
   starts, then closes the bank file. This intentionally differs from the DS
   one-sample policy so live sample changes cannot starve audio buffers or
   interrupt a frozen reverb. The bundled bank uses 48 kHz signed 16-bit mono;

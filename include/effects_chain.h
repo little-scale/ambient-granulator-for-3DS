@@ -9,6 +9,7 @@
 #define EFFECTS_FDN_LINES 4
 #define EFFECTS_FDN_MAX_DELAY 24000
 #define EFFECTS_PHASER_STAGES 4
+#define EFFECTS_OUTPUT_SOFT_CLIP_KNEE 26028
 
 typedef struct {
     int wet_percent;
@@ -49,6 +50,7 @@ typedef struct {
     int configured_damping;
     uint64_t input_overload_events;
     uint64_t fdn_overload_events;
+    uint64_t output_overload_events;
     bool block_overloaded;
     bool initialized;
 } EffectsChain;

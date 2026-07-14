@@ -9,7 +9,7 @@ The signal order is:
 
 ```text
 granular voices -> wide mix -> soft knee -> stereo phaser -> FDN wet/dry
-                -> HPF -> LPF -> meter -> NDSP
+                -> HPF -> LPF -> final soft clip -> meter -> NDSP
 ```
 
 ## Phaser
@@ -74,9 +74,13 @@ use fast attack and a roughly one-second visual decay, while the numerical
 readout reports the louder channel in dBFS.
 
 The wide grain input and non-frozen FDN use a cheap rational soft knee above
-30000 rather than a flat hard clip. Signals below the knee remain bit-exact.
-If the raw grain mix, an internal FDN operation, or final PCM exceeds signed
-16-bit range, the inverted `CLIP` block is held for approximately one second.
+30000 rather than a flat hard clip. A separate unity-gain output soft clipper
+is placed after both filters and outside the FDN feedback loop. It remains
+bit-exact below its -2 dBFS knee (26028), then bends smoothly toward full scale
+without calling floating-point `tanh`; it applies equally during Freeze without
+altering or damping the held tail. If the raw grain mix, an internal FDN
+operation, or pre-clipped final output exceeds signed 16-bit range, the inverted
+`CLIP` block is held for approximately one second.
 Consequently a 100%-wet reverb can now report an overloaded excitation even if
 the delayed output peak itself is modest. Gain, Vol, density, reverb level, or
 Feedback should be reduced when `CLIP` remains active.
@@ -84,7 +88,7 @@ Feedback should be reduced when `CLIP` remains active.
 ## Acceptance limits
 
 Host-rendered tests cover coefficients, dry identity, wide polyphonic sums,
-soft overload behavior and telemetry, stereo phaser motion, stereo tail
+internal and final soft overload behavior and telemetry, stereo phaser motion, stereo tail
 generation, live sample changes through a frozen tail, Freeze excitation
 blocking/unity feedback, and filter responses. Azahar can confirm interactive
 sound and control changes. Feedback stability, speaker and headphone

@@ -51,6 +51,7 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic \
     -I"$project_dir/include" \
     "$project_dir/source/granular_engine.c" \
     "$project_dir/source/effects_chain.c" \
+    "$project_dir/source/ram_sample.c" \
     "$project_dir/tests/live_sample_switch_test.c" \
     -lm \
     -o "$test_dir/live_sample_switch_test"
@@ -72,3 +73,19 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic \
     -o "$test_dir/edit_repeat_test"
 
 "$test_dir/edit_repeat_test"
+
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+    -I"$project_dir/include" \
+    "$project_dir/source/recording_buffer.c" \
+    "$project_dir/tests/recording_buffer_test.c" \
+    -o "$test_dir/recording_buffer_test"
+
+"$test_dir/recording_buffer_test"
+
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+    -I"$project_dir/include" \
+    "$project_dir/source/ram_sample.c" \
+    "$project_dir/tests/ram_sample_test.c" \
+    -o "$test_dir/ram_sample_test"
+
+"$test_dir/ram_sample_test"

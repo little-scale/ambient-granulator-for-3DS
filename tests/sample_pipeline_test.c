@@ -16,6 +16,44 @@ static int16_t output[TEST_FRAMES * 2];
 static int16_t minimum[WAVEFORM_COLUMNS];
 static int16_t maximum[WAVEFORM_COLUMNS];
 
+static void test_changed_waveform_columns(void)
+{
+    int16_t samples[32];
+    int16_t partial_minimum[8];
+    int16_t partial_maximum[8];
+    int16_t full_minimum[8];
+    int16_t full_maximum[8];
+    for (int index = 0; index < 32; index++)
+        samples[index] = (int16_t)(index - 16);
+    waveform_analyze(samples, 32, partial_minimum, partial_maximum, 8);
+    for (int index = 9; index < 14; index++)
+        samples[index] = (int16_t)(2000 + index);
+    waveform_analyze_changed(samples, 32,
+                             partial_minimum, partial_maximum, 8, 9, 5);
+    waveform_analyze(samples, 32, full_minimum, full_maximum, 8);
+    assert(memcmp(partial_minimum, full_minimum,
+                  sizeof(full_minimum)) == 0);
+    assert(memcmp(partial_maximum, full_maximum,
+                  sizeof(full_maximum)) == 0);
+
+    int16_t uneven_samples[10] = { 0 };
+    int16_t uneven_partial_minimum[3];
+    int16_t uneven_partial_maximum[3];
+    int16_t uneven_full_minimum[3];
+    int16_t uneven_full_maximum[3];
+    waveform_analyze(uneven_samples, 10, uneven_partial_minimum,
+                     uneven_partial_maximum, 3);
+    uneven_samples[3] = 3000;
+    waveform_analyze_changed(uneven_samples, 10, uneven_partial_minimum,
+                             uneven_partial_maximum, 3, 3, 1);
+    waveform_analyze(uneven_samples, 10, uneven_full_minimum,
+                     uneven_full_maximum, 3);
+    assert(memcmp(uneven_partial_minimum, uneven_full_minimum,
+                  sizeof(uneven_full_minimum)) == 0);
+    assert(memcmp(uneven_partial_maximum, uneven_full_maximum,
+                  sizeof(uneven_full_maximum)) == 0);
+}
+
 static SampleRenderConfig default_config(void)
 {
     SampleRenderConfig config = {
@@ -32,9 +70,10 @@ static void test_bank_and_waveform(const char *path, SampleBank *bank,
                                    LoadedSample *sample)
 {
     assert(sample_bank_open(bank, path));
-    assert(bank->sample_count == 9);
+    assert(bank->sample_count == 10);
     assert(bank->sample_rate == 16384 || bank->sample_rate == 48000);
     assert(strcmp(bank->entries[0].name, "1") == 0);
+    assert(strcmp(bank->entries[9].name, "piano") == 0);
     assert(sample_bank_load(bank, 0, sample));
     assert(sample->sample_count > 1000);
     assert(sample->sample_rate == bank->sample_rate);
@@ -142,6 +181,7 @@ static void test_resident_library(const char *path)
 int main(int argc, char **argv)
 {
     assert(argc == 2);
+    test_changed_waveform_columns();
     SampleBank bank;
     LoadedSample sample;
     test_bank_and_waveform(argv[1], &bank, &sample);

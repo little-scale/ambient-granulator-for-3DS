@@ -7,6 +7,8 @@
 
 #define GRANULAR_OUTPUT_RATE 48000
 #define GRANULAR_VOICE_COUNT 16
+#define GRANULAR_DECLICK_FRAMES (GRANULAR_OUTPUT_RATE * 3 / 1000)
+#define GRANULAR_TAIL_COUNT (GRANULAR_VOICE_COUNT * 2)
 #define GRANULAR_MARKER_QUEUE_SIZE 64
 
 typedef struct {
@@ -46,19 +48,27 @@ typedef struct {
     uint32_t length;
     uint32_t attack_samples;
     uint32_t release_samples;
+    uint32_t age_frames;
     int32_t left_gain_q8;
     int32_t right_gain_q8;
 } GranularVoice;
+
+typedef struct {
+    GranularVoice voice;
+    uint32_t frames_remaining;
+} GranularTail;
 
 typedef struct {
     const int16_t *sample;
     uint32_t sample_count;
     uint32_t source_rate;
     GranularVoice voices[GRANULAR_VOICE_COUNT];
+    GranularTail tails[GRANULAR_TAIL_COUNT];
     int next_voice;
     int burst_center;
     int burst_remaining;
     int frames_until_grain;
+    bool gate_repeat_pending;
     bool previous_gate;
     uint32_t random_state;
     uint64_t rendered_frames;
@@ -81,6 +91,7 @@ void granular_engine_set_sample(GranularEngine *engine,
                                 const int16_t *sample,
                                 uint32_t sample_count,
                                 uint32_t source_rate);
+void granular_engine_stop(GranularEngine *engine);
 void granular_engine_trigger(GranularEngine *engine, int center_x,
                              int grain_count);
 void granular_engine_render(GranularEngine *engine,

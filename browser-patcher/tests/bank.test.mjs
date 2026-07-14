@@ -15,12 +15,13 @@ import {
 const realBank = new Uint8Array(readFileSync(
   new URL("../../romfs/sample_bank.bin", import.meta.url)));
 
-test("opens and exactly rebuilds the real nine-sample bank", () => {
+test("opens and exactly rebuilds the real ten-sample bank", () => {
   const decoded = decodeBank(realBank);
-  assert.equal(decoded.samples.length, 9);
+  assert.equal(decoded.samples.length, 10);
   assert.ok([16384, TARGET_RATE].includes(decoded.sampleRate));
   assert.equal(decoded.samples[0].name, "1");
   assert.equal(decoded.samples[8].name, "sample1");
+  assert.equal(decoded.samples[9].name, "piano");
   assert.equal(estimatedBankBytes(decoded.samples, decoded.sampleRate),
     realBank.length);
 

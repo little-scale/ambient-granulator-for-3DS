@@ -50,6 +50,7 @@ export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 export _3DSXDEPS := $(OUTPUT).smdh
 export _3DSXFLAGS += --smdh=$(OUTPUT).smdh
 ifneq ($(ROMFS),)
+export _3DSXDEPS += $(CURDIR)/$(ROMFS)/sample_bank.bin
 export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 

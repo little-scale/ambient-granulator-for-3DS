@@ -191,8 +191,10 @@ static void test_wide_soft_limit_and_internal_overload(void)
     wide_input[0] = 200000;
     wide_input[1] = -200000;
     effects_chain_process_wide(&chain, wide_input, output, 16, &config);
-    assert(output[0] > 30000 && output[0] < 32767);
-    assert(output[1] < -30000 && output[1] > -32768);
+    assert(output[0] > EFFECTS_OUTPUT_SOFT_CLIP_KNEE
+        && output[0] < 30000);
+    assert(output[1] < -EFFECTS_OUTPUT_SOFT_CLIP_KNEE
+        && output[1] > -30000);
     assert(effects_chain_overloaded(&chain));
     assert(chain.input_overload_events == 2);
 
@@ -201,7 +203,8 @@ static void test_wide_soft_limit_and_internal_overload(void)
     wide_input[1] = INT16_MIN;
     effects_chain_process_wide(&chain, wide_input, output, 16, &config);
     assert(output[0] == 10000);
-    assert(output[1] < -30000);
+    assert(output[1] < -EFFECTS_OUTPUT_SOFT_CLIP_KNEE);
+    assert(output[1] > -30000);
     assert(!effects_chain_overloaded(&chain));
 
     config.wet_percent = 100;
@@ -219,6 +222,44 @@ static void test_wide_soft_limit_and_internal_overload(void)
     effects_chain_reset(&chain);
     assert(chain.input_overload_events == 0);
     assert(chain.fdn_overload_events == 0);
+    assert(chain.output_overload_events == 0);
+    assert(!effects_chain_overloaded(&chain));
+    effects_chain_exit(&chain);
+}
+
+static void test_final_output_soft_clip(void)
+{
+    EffectsChain chain;
+    EffectsConfig config = default_config();
+    config.wet_percent = 0;
+    config.phaser_depth_percent = 0;
+    assert(effects_chain_init(&chain));
+
+    memset(wide_input, 0, 8 * 2 * sizeof(*wide_input));
+    wide_input[0] = 20000;
+    wide_input[1] = -20000;
+    wide_input[2] = EFFECTS_OUTPUT_SOFT_CLIP_KNEE;
+    wide_input[3] = -EFFECTS_OUTPUT_SOFT_CLIP_KNEE;
+    wide_input[4] = 28000;
+    wide_input[5] = -28000;
+    effects_chain_process_wide(&chain, wide_input, output, 8, &config);
+    assert(output[0] == 20000);
+    assert(output[1] == -20000);
+    assert(output[2] == EFFECTS_OUTPUT_SOFT_CLIP_KNEE);
+    assert(output[3] == -EFFECTS_OUTPUT_SOFT_CLIP_KNEE);
+    assert(output[4] > EFFECTS_OUTPUT_SOFT_CLIP_KNEE);
+    assert(output[4] < 28000);
+    assert(output[5] < -EFFECTS_OUTPUT_SOFT_CLIP_KNEE);
+    assert(output[5] > -28000);
+    assert(!effects_chain_overloaded(&chain));
+
+    int16_t non_frozen = output[4];
+    effects_chain_reset(&chain);
+    config.freeze = true;
+    memset(wide_input, 0, 2 * sizeof(*wide_input));
+    wide_input[0] = 28000;
+    effects_chain_process_wide(&chain, wide_input, output, 1, &config);
+    assert(output[0] == non_frozen);
     assert(!effects_chain_overloaded(&chain));
     effects_chain_exit(&chain);
 }
@@ -231,6 +272,7 @@ int main(void)
     test_freeze_blocks_excitation_but_keeps_dry();
     test_subtle_stereo_phaser();
     test_wide_soft_limit_and_internal_overload();
+    test_final_output_soft_clip();
     test_output_filters();
     puts("effects_chain_test: all checks passed");
     return 0;

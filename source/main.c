@@ -11,6 +11,8 @@
 #include "audio_output.h"
 #include "build_info.h"
 #include "edit_repeat.h"
+#include "microphone_input.h"
+#include "ram_sample.h"
 #include "sample_bank.h"
 #include "sample_library.h"
 #include "waveform.h"
@@ -149,6 +151,10 @@ typedef struct {
     bool b_pressed;
     bool b_used;
     bool touch_active;
+    bool sample_is_ram;
+    bool ram_allocation_failed;
+    uint32_t recording_start_sample;
+    int recording_start_x;
     touchPosition touch;
     circlePosition circle;
     uint32_t keys_held;
@@ -259,7 +265,8 @@ static void format_output_peak(const AudioOutput *audio, char *text,
              magnitude / 10, magnitude % 10);
 }
 
-static void format_parameter(int index, char *text, size_t size)
+static void format_parameter(const AppState *state, int index,
+                             char *text, size_t size)
 {
     int value = parameters[index].value;
     switch (index) {
@@ -318,8 +325,11 @@ static void format_parameter(int index, char *text, size_t size)
             snprintf(text, size, "%dHZ", value);
         break;
     case PARAM_SAMPLE:
-        snprintf(text, size, "%02d/%02d", value + 1,
-                 parameters[PARAM_SAMPLE].maximum + 1);
+        if (state->sample_is_ram)
+            snprintf(text, size, "RAM");
+        else
+            snprintf(text, size, "%02d/%02d", value + 1,
+                     parameters[PARAM_SAMPLE].maximum + 1);
         break;
     default:
         snprintf(text, size, "%d", value);
@@ -329,11 +339,16 @@ static void format_parameter(int index, char *text, size_t size)
 
 static void draw_top_screen(const AppState *state, const AudioOutput *audio,
                             const SampleBank *bank,
-                            const LoadedSample *sample)
+                            const LoadedSample *sample,
+                            const MicrophoneInput *microphone)
 {
     char text[64];
     draw_text(0, TOP_ROW_OFFSET, "GRAIN", false);
-    snprintf(text, sizeof(text), "S%02d", parameters[PARAM_SAMPLE].value + 1);
+    if (state->sample_is_ram)
+        snprintf(text, sizeof(text), "RAM");
+    else
+        snprintf(text, sizeof(text), "S%02d",
+                 parameters[PARAM_SAMPLE].value + 1);
     draw_text(8, TOP_ROW_OFFSET, text, false);
     draw_text(25, TOP_ROW_OFFSET, "VOICE", false);
     draw_text(35, TOP_ROW_OFFSET, APP_BUILD_ID, false);
@@ -348,7 +363,7 @@ static void draw_top_screen(const AppState *state, const AudioOutput *audio,
         const Parameter *parameter = &parameters[index];
         draw_text(parameter->column, parameter->row + TOP_ROW_OFFSET,
                   parameter->name, false);
-        format_parameter(index, text, sizeof(text));
+        format_parameter(state, index, text, sizeof(text));
         draw_text(parameter->value_column,
                   parameter->row + TOP_ROW_OFFSET, text,
                   index == state->selected_parameter);
@@ -376,9 +391,11 @@ static void draw_top_screen(const AppState *state, const AudioOutput *audio,
                  audio_output_active_voices(audio),
                  parameters[PARAM_POLYPHONY].value);
         draw_text(0, 23 + TOP_ROW_OFFSET, text, false);
-        snprintf(text, sizeof(text), "BUF %08lX XRUN %03lu",
-                 (unsigned long)audio->buffers_submitted,
-                 (unsigned long)audio_output_underruns(audio));
+        snprintf(text, sizeof(text), "BUF %08lX X%03lu L%03lu Z%03lu",
+                 (unsigned long)audio_output_buffers_submitted(audio),
+                 (unsigned long)audio_output_underruns(audio),
+                 (unsigned long)audio_output_late_refills(audio),
+                 (unsigned long)audio_output_silent_blocks(audio));
         draw_text(0, 24 + TOP_ROW_OFFSET, text, false);
     } else {
         snprintf(text, sizeof(text), "ERR %08lX",
@@ -392,6 +409,31 @@ static void draw_top_screen(const AppState *state, const AudioOutput *audio,
         else
             draw_text(0, 24 + TOP_ROW_OFFSET,
                       "NDSP INIT FAILED", false);
+    }
+
+    if (microphone_input_recording(microphone)) {
+        uint32_t samples = microphone_input_sample_count(microphone);
+        uint32_t hundredths = samples * 100U
+                            / MICROPHONE_INPUT_SAMPLE_RATE;
+        snprintf(text, sizeof(text), "REC @%03d %lu.%02luS",
+                 state->recording_start_x,
+                 (unsigned long)(hundredths / 100U),
+                 (unsigned long)(hundredths % 100U));
+        draw_text(0, 22 + TOP_ROW_OFFSET, text, true);
+    } else if (!microphone_input_available(microphone)) {
+        snprintf(text, sizeof(text), "MIC ERR %08lX",
+                 (unsigned long)(uint32_t)
+                    microphone_input_result(microphone));
+        draw_text(0, 22 + TOP_ROW_OFFSET, text, false);
+    } else if (state->ram_allocation_failed) {
+        draw_text(0, 22 + TOP_ROW_OFFSET, "RAM ALLOC FAILED", false);
+    } else if (microphone_input_take_too_short(microphone)) {
+        draw_text(0, 22 + TOP_ROW_OFFSET, "MIC TAP IGNORED", false);
+    } else if (R_FAILED((Result)microphone_input_result(microphone))) {
+        snprintf(text, sizeof(text), "MIC ERR %08lX",
+                 (unsigned long)(uint32_t)
+                    microphone_input_result(microphone));
+        draw_text(0, 22 + TOP_ROW_OFFSET, text, false);
     }
 
     format_output_peak(audio, text, sizeof(text));
@@ -659,8 +701,62 @@ static bool select_sample(const SampleLibrary *library,
                                 replacement->sample_count,
                                 replacement->sample_rate);
     *sample = replacement;
+    state->sample_is_ram = false;
+    state->ram_allocation_failed = false;
     memset(state->marker_ttl, 0, sizeof(state->marker_ttl));
     state->playhead_x = BOTTOM_WIDTH / 2;
+    return true;
+}
+
+static bool prepare_ram_recording(RamSample *ram_sample,
+                                  const LoadedSample *current_sample,
+                                  AppState *state)
+{
+    state->ram_allocation_failed = false;
+    if (current_sample == NULL || current_sample->samples == NULL
+            || !ram_sample_clone(ram_sample, current_sample->samples,
+                                 current_sample->sample_count,
+                                 current_sample->sample_rate)) {
+        state->ram_allocation_failed = true;
+        return false;
+    }
+    state->recording_start_x = state->playhead_x;
+    state->recording_start_sample = ram_sample_position(
+        ram_sample->sample_count, state->playhead_x, BOTTOM_WIDTH);
+    return true;
+}
+
+static bool commit_ram_recording(MicrophoneInput *microphone,
+                                 RamSample *ram_sample,
+                                 LoadedSample *ram_view,
+                                 const LoadedSample **current_sample,
+                                 AudioOutput *audio, AppState *state)
+{
+    if (!microphone_input_finish(microphone))
+        return false;
+    uint32_t written = ram_sample_punch_in(
+        ram_sample, state->recording_start_sample,
+        microphone_input_samples(microphone),
+        microphone_input_sample_count(microphone),
+        MICROPHONE_INPUT_SAMPLE_RATE);
+    if (written == 0)
+        return false;
+
+    if (!state->sample_is_ram)
+        snprintf(ram_view->name, sizeof(ram_view->name), "RAM %.28s",
+                 (*current_sample)->name);
+    ram_view->samples = ram_sample->samples;
+    ram_view->sample_count = ram_sample->sample_count;
+    ram_view->sample_rate = ram_sample->sample_rate;
+    waveform_analyze_changed(ram_view->samples, ram_view->sample_count,
+                             waveform_minimum, waveform_maximum,
+                             BOTTOM_WIDTH, state->recording_start_sample,
+                             written);
+    audio_output_set_sample(audio, ram_view->samples,
+                            ram_view->sample_count, ram_view->sample_rate);
+    *current_sample = ram_view;
+    state->sample_is_ram = true;
+    memset(state->marker_ttl, 0, sizeof(state->marker_ttl));
     return true;
 }
 
@@ -670,11 +766,17 @@ int main(void)
     SampleBank bank;
     SampleLibrary sample_library;
     LoadedSample empty_sample;
+    LoadedSample ram_view;
+    RamSample ram_sample;
+    MicrophoneInput microphone;
     const LoadedSample *loaded_sample = &empty_sample;
     memset(&state, 0, sizeof(state));
     memset(&bank, 0, sizeof(bank));
     memset(&sample_library, 0, sizeof(sample_library));
     memset(&empty_sample, 0, sizeof(empty_sample));
+    memset(&ram_view, 0, sizeof(ram_view));
+    memset(&ram_sample, 0, sizeof(ram_sample));
+    memset(&microphone, 0, sizeof(microphone));
     state.playhead_x = BOTTOM_WIDTH / 2;
     reset_parameters();
 
@@ -720,6 +822,7 @@ int main(void)
     AudioOutput audio;
     audio_output_init(&audio, &config, loaded_sample->samples,
                       loaded_sample->sample_count, loaded_sample->sample_rate);
+    microphone_input_init(&microphone);
 
     bool running = true;
     while (running && aptMainLoop()) {
@@ -728,7 +831,10 @@ int main(void)
         uint32_t up = hidKeysUp();
         state.keys_held = hidKeysHeld();
         hidCircleRead(&state.circle);
-        state.touch_active = (state.keys_held & KEY_TOUCH) != 0;
+        microphone_input_update(&microphone);
+        bool recording = microphone_input_recording(&microphone);
+        state.touch_active = !recording
+                          && (state.keys_held & KEY_TOUCH) != 0;
         if (state.touch_active) {
             hidTouchRead(&state.touch);
             state.playhead_x = state.touch.px;
@@ -740,7 +846,33 @@ int main(void)
 
         if (down & KEY_START)
             running = false;
-        if (down & KEY_B) {
+
+        if ((down & KEY_R) && !recording) {
+            AudioRenderConfig quiet_config = render_config(&state);
+            quiet_config.granular.gate = false;
+            audio_output_update(&audio, &quiet_config);
+            if (prepare_ram_recording(&ram_sample, loaded_sample, &state)
+                    && microphone_input_start(&microphone)) {
+                audio_output_stop_grains(&audio);
+                memset(state.marker_ttl, 0, sizeof(state.marker_ttl));
+                state.b_pressed = false;
+                state.b_used = false;
+                state.touch_active = false;
+            }
+            recording = microphone_input_recording(&microphone);
+        }
+
+        if (recording && ((up & KEY_R)
+                          || microphone_input_full(&microphone))) {
+            AudioRenderConfig quiet_config = render_config(&state);
+            quiet_config.granular.gate = false;
+            audio_output_update(&audio, &quiet_config);
+            commit_ram_recording(&microphone, &ram_sample, &ram_view,
+                                 &loaded_sample, &audio, &state);
+            recording = false;
+        }
+
+        if (!recording && (down & KEY_B)) {
             state.b_pressed = true;
             state.b_used = false;
         }
@@ -755,16 +887,19 @@ int main(void)
                                         & ~state.previous_circle_directions;
         state.previous_circle_directions = circle_directions;
         uint32_t edit_directions = edit_repeat_update(
-            &state.edit_repeat, (state.keys_held & KEY_B) != 0,
-            directions_down | circle_directions_down,
-            directions_held | circle_directions);
+            &state.edit_repeat,
+            !recording && (state.keys_held & KEY_B) != 0,
+            recording ? 0 : directions_down | circle_directions_down,
+            recording ? 0 : directions_held | circle_directions);
         uint32_t navigation_directions = edit_repeat_update(
-            &state.navigation_repeat, (state.keys_held & KEY_B) == 0,
-            directions_down | circle_directions_down,
-            directions_held | circle_directions);
+            &state.navigation_repeat,
+            !recording && (state.keys_held & KEY_B) == 0,
+            recording ? 0 : directions_down | circle_directions_down,
+            recording ? 0 : directions_held | circle_directions);
         if (edit_directions != 0) {
             Parameter *parameter = &parameters[state.selected_parameter];
             int previous_sample = parameters[PARAM_SAMPLE].value;
+            bool editing_sample = state.selected_parameter == PARAM_SAMPLE;
             if (edit_directions & KEY_DLEFT)
                 nudge_selected(&state, -parameter->step);
             if (edit_directions & KEY_DRIGHT)
@@ -773,7 +908,8 @@ int main(void)
                 nudge_selected(&state, parameter->coarse_step);
             if (edit_directions & KEY_DDOWN)
                 nudge_selected(&state, -parameter->coarse_step);
-            if (parameters[PARAM_SAMPLE].value != previous_sample
+            if ((parameters[PARAM_SAMPLE].value != previous_sample
+                    || (editing_sample && state.sample_is_ram))
                     && !select_sample(&sample_library, &loaded_sample, &audio,
                                       &state,
                                       parameters[PARAM_SAMPLE].value))
@@ -787,7 +923,7 @@ int main(void)
             move_cursor(&state, horizontal, vertical);
         }
 
-        if (up & KEY_B) {
+        if (!recording && (up & KEY_B)) {
             if (state.b_pressed && !state.b_used)
                 audio_output_trigger(&audio, state.playhead_x,
                                      parameters[PARAM_GRAINS].value);
@@ -799,6 +935,8 @@ int main(void)
             reset_parameters();
 
         config = render_config(&state);
+        if (recording)
+            config.granular.gate = false;
         audio_output_update(&audio, &config);
         GranularMarker marker;
         while (audio_output_pop_marker(&audio, &marker))
@@ -808,7 +946,7 @@ int main(void)
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
         C2D_TargetClear(top, C2D_Color32(255, 255, 255, 255));
         C2D_SceneBegin(top);
-        draw_top_screen(&state, &audio, &bank, loaded_sample);
+        draw_top_screen(&state, &audio, &bank, loaded_sample, &microphone);
         C2D_TargetClear(bottom, C2D_Color32(0, 0, 0, 255));
         C2D_SceneBegin(bottom);
         draw_bottom_screen(&state);
@@ -816,6 +954,8 @@ int main(void)
     }
 
     audio_output_exit(&audio);
+    microphone_input_exit(&microphone);
+    ram_sample_free(&ram_sample);
     sample_library_free(&sample_library);
     sample_bank_close(&bank);
     if (romfs_mounted)

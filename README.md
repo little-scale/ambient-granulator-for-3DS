@@ -74,11 +74,16 @@ Milestones 1–6 have an initial native baseline:
 - a compact sequential two-decimal top-screen version (`V0.01`, `V0.02`, ...)
   and short Git hash, with `+` marking a build made from uncommitted changes;
 - touchscreen, buttons, D-pad grammar, and Circle Pad input;
-- four-buffer 48 kHz stereo PCM streaming through NDSP;
+- callback-driven four-buffer 48 kHz stereo PCM streaming through NDSP on a
+  dedicated audio-service thread, independent of display frame rate and kept
+  at main-thread priority to prevent UI starvation under sustained DSP load;
+- non-blocking audio-status snapshots and marker reads keep the GUI responsive
+  while the audio worker renders, with control and DSP state synchronized by
+  separate short-lived locks;
 - the DS-compatible `NDSGRN01` bank format with bounds and CRC validation;
-- all nine source samples embedded in a 10.16 MiB RomFS bank, with an optional
+- all ten source samples embedded in an 11.62 MiB RomFS bank, with an optional
   SD-card bank override;
-- all nine originals downmixed and converted with a cached 32-tap
+- all ten originals downmixed and converted with a cached 32-tap
   windowed-sinc resampler to 48 kHz mono PCM16, then preloaded with their
   display waveforms before NDSP starts;
 - the actual loaded sample rendered as a min/max waveform;
@@ -97,6 +102,11 @@ Milestones 1–6 have an initial native baseline:
 - waveform markers emitted by actual audio-scheduled grain launches;
 - memory-only live sample switching that does not interrupt frozen or decaying
   reverb tails;
+- hold-R native microphone capture into a temporary RAM sample, with each take
+  destructively punched in from the current waveform position while all
+  unrecorded regions and earlier snippets remain intact;
+- a 44 dB console-microphone gain default plus fixed-point punch conversion and
+  changed-region waveform analysis for old-model NDSP headroom;
 - a sample-rate-normalized stereo four-line Hadamard FDN reverb with wet/dry,
   feedback, size and damping;
 - true Freeze: blocked excitation, unity feedback, damping bypass, and an
@@ -104,10 +114,14 @@ Milestones 1–6 have an initial native baseline:
 - a lightweight four-stage stereo phaser before the reverb, with depth and a
   deliberately slow 0.01–1.00 Hz sweep;
 - stereo first-order HPF and LPF after the wet/dry mix;
+- a low-cost, unity-gain final soft clipper after both filters and outside the
+  feedback loop, bit-exact below -2 dBFS and active during Freeze;
 - post-chain stereo peak bars, a decaying dBFS readout, and a held `CLIP`
   warning covering final PCM, pre-effects grain overload, and internal FDN
   overload;
-- an `XRUN` counter that detects the entire four-buffer NDSP queue running dry,
+- live `X`, `L` and `Z` audio diagnostics: full NDSP queue exhaustion,
+  dangerously late three-buffer refills, and wholly silent grain-engine blocks
+  while a grain remains active (measured before reverb and other effects);
   separating app-side starvation from clicks introduced by an emulator or
   downstream audio device;
 - host-side audio regression checks and native artifact validation;
@@ -124,15 +138,18 @@ NDSP audio, touch and button control, Circle Pad navigation/editing, sample
 selection, granular playback, reverb and Freeze, phaser, filters, and output
 metering without observed hardware issues. The new 48 kHz source bank passes
 host and artifact validation but still needs its own hardware listening pass.
-Sleep/resume, microphone recording, and networking remain separate acceptance
-passes.
+The native microphone punch-in path passes host and build validation and is the
+next physical-console acceptance pass. Sleep/resume and networking remain
+separate acceptance passes.
 
 This is now a real granular sampler with its core stereo DSP path, not a tone or
-raw-sample stand-in. Microphone recording and OSC networking remain to port;
-polyphony and quality improvements follow real-hardware profiling.
+raw-sample stand-in. OSC networking remains to port; microphone punch-in,
+polyphony, and quality improvements continue through real-hardware profiling.
 
 The inspected DS invariants and the decisions based on them are recorded in
 [`docs/DS_REFERENCE.md`](docs/DS_REFERENCE.md).
+The temporary RAM-layer and destructive-punch behavior is specified in
+[`docs/MICROPHONE_RECORDING.md`](docs/MICROPHONE_RECORDING.md).
 
 ## Toolchain
 
@@ -175,7 +192,7 @@ Copy `dist/3ds/3ds-granulator` into the SD card's `/3ds/` directory, then launch
 ./scripts/verify-build.sh  # tests, build, 3DSX magic, ARM ELF, checksum
 ```
 
-The host tests retain the oscillator checks and also open the real nine-sample
+The host tests retain the oscillator checks and also open the real ten-sample
 bank, validate its metadata and every sample CRC, analyze all waveforms, and
 cover sample silence, centered playback, hard-left panning, position, linear
 rate conversion, and timed trigger/release. A deterministic granular suite then
@@ -186,8 +203,11 @@ feedback, dry-path behaviour, and both output filters. The meter suite checks
 stereo peak capture, decay, full-scale detection, and clip hold. A live-switch integration
 test verifies that closing the bank and swapping the grain source cannot clear a
 frozen tail, and that the tail accepts new excitation after unfreezing. This
-catches data, scheduler, and audio-math regressions without requiring 3DS
-services.
+covers a destructive RAM punch-in as the replacement source. Dedicated capture
+tests also cover linear and wrapped microphone-ring reads, bounded four-second
+storage, exact preservation outside a punch, repeated snippets, resampling, and
+end-of-sample truncation. Together these catch data, scheduler, and audio-math
+regressions without requiring 3DS services.
 
 ## Sample bank and loading policy
 
@@ -206,9 +226,19 @@ responsible for the rights to audio placed into replacement banks.
 To reproduce the native bank from local source WAVs in `samples/`:
 
 ```sh
+./scripts/normalize-wav-samples.mjs samples -1.0
 cd browser-patcher
 npm run bank
 ```
+
+The normalization helper preserves each WAV's channel count, sample rate, bit
+depth, duration, and non-audio RIFF chunks while setting its integer PCM sample
+peak to -1.0 dBFS. The bank builder then performs its normal mono downmix and
+48 kHz conversion, measures that final signal, and independently normalizes
+each bundled mono sample to -1.0 dBFS immediately before PCM16 quantization.
+The standalone browser patcher continues to preserve user-authored Gain values;
+automatic final normalization applies only to the reproducible bundled-bank
+script.
 
 The legacy import helper remains available for behavioural comparison with the
 preserved DS project:
@@ -231,8 +261,8 @@ starts, then closes the bank file. Live selection therefore performs no SD or
 RomFS reads, no allocation, no CRC pass, and no full waveform scan: it only
 swaps a resident PCM pointer and copies 1.25 KiB of cached display data. This
 intentional departure from the DS one-sample policy prevents buffer starvation
-while preserving reverb state. The current nine-sample library uses about
-10.15 MiB of heap PCM. Bundled source PCM is signed 16-bit mono at 48 kHz, while
+while preserving reverb state. The current ten-sample library uses about
+11.62 MiB of heap PCM. Bundled source PCM is signed 16-bit mono at 48 kHz, while
 legacy 16.384 kHz replacement banks remain supported. Each grain uses a
 source/output-rate-correct Q16 step and linear interpolation in the native
 48 kHz stereo NDSP stream. Runtime Pan and Pan Deviation spatialize the mono
@@ -322,8 +352,17 @@ by this project.
 - The performance-oriented space defaults are REV 100%, Feedback 90.0%, Size
   100%, and Damp 5%; X restores these values along with the other defaults.
 - BPM defaults to 96 and Pan Deviation defaults to 100%.
-- Edit Sample with B + D-pad to load any of the nine bank entries and redraw
+- Edit Sample with B + D-pad to load any of the ten bank entries and redraw
   the waveform.
+- Hold R to record from the console microphone. Recording begins at the current
+  waveform position and stops when R is released, or automatically at four
+  seconds. The take destructively replaces only that span in a temporary RAM
+  copy; the rest of the waveform and earlier punch-ins remain intact. The top
+  screen shows `REC`, its start position, and elapsed time.
+- After the first successful take the Source field reads `RAM`. Move the
+  waveform position and hold R again to place another snippet in the same RAM
+  sample. Editing Sample loads a bank entry and leaves RAM mode. RAM recordings
+  are temporary and are lost when the app exits; very short R taps are ignored.
 - Poly sets the maximum simultaneous grains from 1 to 16. It defaults to 16;
   lower it if physical old-model hardware profiling exposes audio underruns.
 - Circle Pad live-pan control has been replaced by grid navigation; Pan remains
@@ -354,6 +393,11 @@ trails.
   NDSP buffering latency, touch calibration, Home/sleep/resume behaviour, Wi-Fi
   timing, microphone behaviour, or old-model CPU headroom. Those need a 2DS/3DS
   hardware pass.
+- Microphone availability and host-input routing vary between emulator builds.
+  A successful Azahar recording is useful, but the console microphone, acoustic
+  speaker pickup, four-second auto-stop, and uninterrupted effects tail must be
+  accepted on physical hardware. Headphones reduce re-recording of the 3DS
+  speakers during punch-in.
 - The emulator may add input and audio latency. Granular scheduler acceptance
   tests will therefore use rendered PCM and real-hardware listening as separate
   gates rather than treating emulator timing as authoritative.
@@ -378,7 +422,9 @@ trails.
    acceptance is pending; real-hardware stability remains a separate gate.
 7. **In progress:** adjustable polyphony now raises the engine from the DS
    baseline of four voices to 16, and the bundled originals now use high-quality
-   offline conversion to 48 kHz. Runtime interpolation quality, DSP headroom
-   measurement, and physical old-model acceptance remain.
+   offline conversion to 48 kHz. Native hold-R microphone recording now provides
+   positional destructive punch-in to a temporary RAM sample. Runtime
+   interpolation quality, DSP headroom measurement, and physical old-model
+   microphone acceptance remain.
 8. Port non-blocking UDP OSC on port 9000 using modern 3DS networking.
 9. Investigate camera-driven control only after the audio instrument is stable.

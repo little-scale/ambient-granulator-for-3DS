@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"
-version="${APP_VERSION:-0.02}"
+version="${APP_VERSION:-0.03}"
 git_hash="UNKNOWN"
 dirty=""
 
