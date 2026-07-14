@@ -2,9 +2,15 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"
-version="${APP_VERSION:-0.03}"
+default_version="$(tr -d '[:space:]' < "$project_dir/VERSION")"
+version="${APP_VERSION:-$default_version}"
 git_hash="UNKNOWN"
 dirty=""
+
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    echo "Invalid application version: $version" >&2
+    exit 1
+fi
 
 if git -C "$project_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git_hash="$(git -C "$project_dir" rev-parse --short=7 HEAD \

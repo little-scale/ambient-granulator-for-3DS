@@ -1,5 +1,9 @@
 # Ambient Granulator for 3DS
 
+[Latest release](https://github.com/little-scale/ambient-granulator-for-3DS/releases/latest)
+· [All releases](https://github.com/little-scale/ambient-granulator-for-3DS/releases)
+· [Changelog](CHANGELOG.md)
+
 Native Nintendo 3DS/2DS homebrew port of the working Nintendo DS Touch
 Granulator. This is a separate project; the preserved sibling
 `nds-locked-granulator ` source project and tested ROM are used only as a
@@ -30,18 +34,22 @@ Homebrew Channel.
 - If the console already has a current boot9strap/Luma3DS setup, Homebrew
   Launcher, and dumped DSP firmware, no additional modification is needed.
 
-### 2. Build and copy the application
+### 2. Download and install the application
 
-Use a provided `3ds_granulator.3dsx`, or build the current source with Docker
-Desktop:
+Download `ambient-granulator-for-3DS-v0.1-sd.zip` from the
+[latest release](https://github.com/little-scale/ambient-granulator-for-3DS/releases/latest).
+Extract it, then merge its `3ds` directory into the root of the console SD card.
+The finished layout is:
 
-```sh
-./scripts/setup.sh
-./scripts/package-sd.sh
+```text
+/3ds/3ds-granulator/
+├── 3ds_granulator.3dsx
+└── 3ds_granulator.smdh
 ```
 
-Copy the resulting `dist/3ds/3ds-granulator` directory into the SD card's
-`/3ds/` directory. The finished layout is:
+For a manual install, download the direct `.3dsx` asset, rename it to
+`3ds_granulator.3dsx`, and use this minimal layout. The `.smdh` file is optional
+because equivalent menu metadata is embedded in the application.
 
 ```text
 /3ds/3ds-granulator/
@@ -64,6 +72,16 @@ second bank file is required. Remove any older
 `/3ds/3ds-granulator/sample_bank.bin` override so it does not take priority over
 the newly embedded bank.
 
+## Releases and versioning
+
+Downloadable builds are published on the
+[GitHub Releases page](https://github.com/little-scale/ambient-granulator-for-3DS/releases).
+The root [`VERSION`](VERSION) file is the application and tag source of truth.
+The first numbered release is `v0.1`; subsequent releases increase by `0.01`,
+so the sequence continues `v0.11`, `v0.12`, `v0.13`, and so on. The top screen
+shows that version plus the short Git commit, with `+` only on locally modified
+builds. Release history is recorded in [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Current status
 
 Milestones 1–6 have an initial native baseline:
@@ -71,8 +89,8 @@ Milestones 1–6 have an initial native baseline:
 - pinned official devkitPro container toolchain;
 - Homebrew Launcher `.3dsx` output;
 - native Citro2D rendering on both screens;
-- a compact sequential two-decimal top-screen version (`V0.01`, `V0.02`, ...)
-  and short Git hash, with `+` marking a build made from uncommitted changes;
+- the release version and short Git hash on the top screen, with `+` marking a
+  build made from uncommitted changes;
 - touchscreen, buttons, D-pad grammar, and Circle Pad input;
 - callback-driven four-buffer 48 kHz stereo PCM streaming through NDSP on a
   dedicated audio-service thread, independent of display frame rate and kept
@@ -105,7 +123,8 @@ Milestones 1–6 have an initial native baseline:
 - hold-R native microphone capture into a temporary RAM sample, with each take
   destructively punched in from the current waveform position while all
   unrecorded regions and earlier snippets remain intact;
-- a 44 dB console-microphone gain default plus fixed-point punch conversion and
+- adjustable 10.5–70.0 dB console-microphone gain, with a 44.0 dB default and
+  compact always-live input meter, plus fixed-point punch conversion and
   changed-region waveform analysis for old-model NDSP headroom;
 - a sample-rate-normalized stereo four-line Hadamard FDN reverb with wet/dry,
   feedback, size and damping;
@@ -119,11 +138,10 @@ Milestones 1–6 have an initial native baseline:
 - post-chain stereo peak bars, a decaying dBFS readout, and a held `CLIP`
   warning covering final PCM, pre-effects grain overload, and internal FDN
   overload;
-- live `X`, `L` and `Z` audio diagnostics: full NDSP queue exhaustion,
+- retained internal audio diagnostics for full NDSP queue exhaustion,
   dangerously late three-buffer refills, and wholly silent grain-engine blocks
-  while a grain remains active (measured before reverb and other effects);
-  separating app-side starvation from clicks introduced by an emulator or
-  downstream audio device;
+  while a grain remains active; these counters are hidden from the performance
+  interface for v0.1 but remain available for later debugging;
 - host-side audio regression checks and native artifact validation;
 - an Azahar launch script for the emulator loop.
 
@@ -184,6 +202,16 @@ To produce an SD-ready directory:
 
 Copy `dist/3ds/3ds-granulator` into the SD card's `/3ds/` directory, then launch
 3DS Granulator from Homebrew Launcher.
+
+After committing a release version, produce the direct binary, SD-ready ZIP,
+and checksum file from a clean worktree with:
+
+```sh
+./scripts/package-release.sh
+```
+
+The assets are written to `dist/release/v<version>/` using the root `VERSION`
+value.
 
 ## Automated checks
 
@@ -337,12 +365,15 @@ by this project.
 - Tap B to trigger one configured grain burst at the current position.
 - Hold A for continuous grain bursts without touching the screen.
 - Plain D-pad moves around the two-column parameter grid.
-- The Circle Pad also moves around the parameter grid, with a dead zone and
-  hysteresis to prevent accidental steps near its centre.
-- Holding either D-pad or Circle Pad navigation repeats after 250 ms at 20
+- The Circle Pad and, on New 3DS models, C-stick also move around the parameter
+  grid, with a dead zone and hysteresis to prevent accidental steps near centre.
+- Holding D-pad, Circle Pad, or C-stick navigation repeats after 250 ms at 20
   fields/second, accelerating after one second.
-- Hold B, then use either D-pad or Circle Pad Left/Right for fine edits or
-  Up/Down for coarse edits. Both inputs use the same held-repeat acceleration.
+- Hold Y and use D-pad, Circle Pad, or C-stick Left/Right to move the current
+  waveform position one display column at a time, with the same held-repeat
+  acceleration.
+- Hold B, then use D-pad, Circle Pad, or C-stick Left/Right for fine edits or
+  Up/Down for coarse edits. The inputs use the same held-repeat acceleration.
   Holding the direction repeats after 250 ms at 20 changes/second, accelerating
   to 60 changes/second after one second.
 - Fine tunes the source by ±100 cents. F Dev adds an independent random
@@ -358,15 +389,18 @@ by this project.
   waveform position and stops when R is released, or automatically at four
   seconds. The take destructively replaces only that span in a temporary RAM
   copy; the rest of the waveform and earlier punch-ins remain intact. The top
-  screen shows `REC`, its start position, and elapsed time.
+  screen shows `REC`, its start position, elapsed time, and a compact `IN` meter.
+- Mic Gain covers 10.5–70.0 dB in 0.5 dB steps and defaults to 44.0 dB. Set it
+  before holding R; the `IN` meter continuously shows the post-gain microphone
+  level, whether or not a take is being recorded.
 - After the first successful take the Source field reads `RAM`. Move the
   waveform position and hold R again to place another snippet in the same RAM
   sample. Editing Sample loads a bank entry and leaves RAM mode. RAM recordings
   are temporary and are lost when the app exits; very short R taps are ignored.
 - Poly sets the maximum simultaneous grains from 1 to 16. It defaults to 16;
   lower it if physical old-model hardware profiling exposes audio underruns.
-- Circle Pad live-pan control has been replaced by grid navigation; Pan remains
-  directly editable in the Voice section.
+- Circle Pad/C-stick live-pan control has been replaced by grid navigation; Pan
+  remains directly editable in the Voice section.
 - L toggles functional FDN Freeze without changing the saved Feedback or Damp
   values.
 - X resets the hardware-test parameters.
@@ -376,7 +410,8 @@ The top screen retains the DS/snesdj black-on-white grid, 5x7 tracker font, and
 inverted selected values. Parameters are grouped as Grain, Clock, Source,
 Voice, Space, and Output; persistent help text is omitted. Two full-width
 post-filter stereo meters occupy the bottom of the screen, with peak dBFS and a
-held `CLIP` block in Output. The interface has a one-row top inset, and the
+held `CLIP` block in Output. A compact logarithmic microphone input meter sits
+above them. The interface has a one-row top inset, and the
 current bank sample name is shown untruncated below the peak indication and
 above the meters. The lower screen remains black with a
 white waveform, solid position, dashed range guides, and short grain-position

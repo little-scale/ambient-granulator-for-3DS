@@ -67,11 +67,45 @@ static void test_invalid_ring_inputs(void)
     assert(recording_buffer_sample_count(&buffer) == 0);
 }
 
+static void test_peak(void)
+{
+    const int16_t samples[] = { 0, 123, -456, INT16_MAX, INT16_MIN };
+    assert(recording_buffer_peak(NULL, 5) == 0);
+    assert(recording_buffer_peak(samples, 0) == 0);
+    assert(recording_buffer_peak(samples, 3) == 456);
+    assert(recording_buffer_peak(samples, 4) == INT16_MAX);
+    assert(recording_buffer_peak(samples, 5) == 32768U);
+}
+
+static void test_ring_peak(void)
+{
+    int16_t samples[] = { -1, 20, -300, 4, 5, -6, 7, INT16_MIN };
+    uint8_t *ring = (uint8_t *)samples;
+    uint32_t read_offset = 0;
+    assert(recording_buffer_ring_peak(
+        ring, sizeof(samples), &read_offset, 8) == 300);
+    assert(read_offset == 8);
+
+    samples[0] = INT16_MIN;
+    assert(recording_buffer_ring_peak(
+        ring, sizeof(samples), &read_offset, 4) == 32768U);
+    assert(read_offset == 4);
+    assert(recording_buffer_ring_peak(
+        ring, sizeof(samples), &read_offset, 4) == 0);
+
+    assert(recording_buffer_ring_peak(
+        ring, sizeof(samples) - 1, &read_offset, 4) == 0);
+    assert(recording_buffer_ring_peak(
+        ring, sizeof(samples), &read_offset, sizeof(samples)) == 0);
+}
+
 int main(void)
 {
     test_linear_and_wrapped_drain();
     test_capacity_and_reset();
     test_invalid_ring_inputs();
+    test_peak();
+    test_ring_peak();
     puts("recording_buffer_test: all checks passed");
     return 0;
 }

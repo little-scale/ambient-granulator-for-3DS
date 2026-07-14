@@ -3,8 +3,15 @@
 Hold R to capture signed 16-bit mono audio from the 3DS microphone. Release R
 to commit the take. Capture stops and commits automatically after four seconds.
 The libctru `MICU_SAMPLE_RATE_32730` setting is treated as 32,728 Hz for the
-sample-rate conversion. Hardware gain is set to 67, corresponding to 44 dB and
-the strongest legacy DS microphone-gain setting; input clamping is enabled.
+sample-rate conversion. The Mic Gain parameter exposes the hardware range from
+10.5 to 70.0 dB in 0.5 dB steps. Its default service value is 67, corresponding
+to 44.0 dB and the strongest legacy DS microphone-gain setting; input clamping
+is enabled.
+
+The compact `IN` meter measures signed PCM16 after hardware gain. It uses a
+logarithmic -60 to 0 dBFS display and runs continuously whenever microphone
+initialization succeeds, including while no take is being recorded. Gain is
+edited before recording with the normal B-plus-direction controls.
 
 ## RAM sample model
 
@@ -38,11 +45,14 @@ division for every destination sample. Waveform analysis is restricted to the
 display columns touched by the punch. Both choices keep release-time work out
 of the NDSP queue deadline on old-model hardware.
 
-The microphone service uses an aligned 64 KiB shared ring, drained once per
-display frame into a bounded four-second capture buffer. R taps shorter than
-512 samples (about 16 ms) do not modify the RAM sample. Service, allocation, and
-capture errors leave the current playable source unchanged and are reported on
-the top screen.
+The microphone service uses an aligned 64 KiB shared ring and samples
+continuously for the input meter. New ring data is inspected once per display
+frame, but it is copied into the bounded four-second capture buffer only while R
+is held. R-down starts the capture reader at the current hardware write offset,
+so audio heard by the meter before R-down cannot leak into the take. R taps
+shorter than 512 samples (about 16 ms) do not modify the RAM sample. Service,
+allocation, and capture errors leave the current playable source unchanged and
+are reported on the top screen.
 
 ## Acceptance
 

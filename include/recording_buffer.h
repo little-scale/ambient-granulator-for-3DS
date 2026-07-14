@@ -19,5 +19,9 @@ size_t recording_buffer_drain(RecordingBuffer *buffer,
                               const uint8_t *ring, uint32_t ring_size,
                               uint32_t write_offset);
 size_t recording_buffer_sample_count(const RecordingBuffer *buffer);
+uint16_t recording_buffer_peak(const int16_t *samples, size_t sample_count);
+uint16_t recording_buffer_ring_peak(const uint8_t *ring, uint32_t ring_size,
+                                    uint32_t *read_offset,
+                                    uint32_t write_offset);
 
 #endif

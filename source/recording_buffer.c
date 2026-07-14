@@ -54,3 +54,46 @@ size_t recording_buffer_sample_count(const RecordingBuffer *buffer)
     return buffer == NULL ? 0
         : buffer->captured_bytes / sizeof(int16_t);
 }
+
+uint16_t recording_buffer_peak(const int16_t *samples, size_t sample_count)
+{
+    uint16_t peak = 0;
+    if (samples == NULL)
+        return peak;
+    for (size_t index = 0; index < sample_count; index++) {
+        int32_t sample = samples[index];
+        uint16_t magnitude = (uint16_t)(sample < 0 ? -sample : sample);
+        if (magnitude > peak)
+            peak = magnitude;
+    }
+    return peak;
+}
+
+uint16_t recording_buffer_ring_peak(const uint8_t *ring, uint32_t ring_size,
+                                    uint32_t *read_offset,
+                                    uint32_t write_offset)
+{
+    if (ring == NULL || read_offset == NULL
+            || ring_size < sizeof(int16_t) || (ring_size & 1U) != 0
+            || *read_offset >= ring_size || write_offset >= ring_size)
+        return 0;
+
+    write_offset &= ~1U;
+    *read_offset &= ~1U;
+    uint16_t peak = 0;
+    while (*read_offset != write_offset) {
+        uint32_t available = write_offset > *read_offset
+            ? write_offset - *read_offset
+            : ring_size - *read_offset;
+        available &= ~1U;
+        if (available == 0)
+            break;
+        uint16_t segment_peak = recording_buffer_peak(
+            (const int16_t *)(ring + *read_offset),
+            available / sizeof(int16_t));
+        if (segment_peak > peak)
+            peak = segment_peak;
+        *read_offset = (*read_offset + available) % ring_size;
+    }
+    return peak;
+}

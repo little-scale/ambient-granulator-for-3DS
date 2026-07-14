@@ -69,6 +69,7 @@ enum {
     PARAM_PHASER_SPEED,
     PARAM_HIGHPASS,
     PARAM_LOWPASS,
+    PARAM_MIC_GAIN,
     PARAM_SAMPLE,
     PARAM_COUNT,
 };
@@ -102,6 +103,9 @@ static Parameter parameters[PARAM_COUNT] = {
     { "P SPD",    10,    1, 100,  1,  10,   "",25, 12, 34 },
     { "HPF",       0,    0,4000, 10, 500, "HZ",25, 20, 34 },
     { "LPF",    8000,  200,8000, 10, 500, "HZ",25, 21, 34 },
+    { "MIC GAIN", MICROPHONE_INPUT_DEFAULT_GAIN,
+        MICROPHONE_INPUT_MIN_GAIN, MICROPHONE_INPUT_MAX_GAIN,
+        1, 12, "", 0, 21, 9 },
     { "SAMPLE",    0,    0,   0,  1,   1,   "", 0, 17,  8 },
 };
 
@@ -157,10 +161,13 @@ typedef struct {
     int recording_start_x;
     touchPosition touch;
     circlePosition circle;
+    circlePosition cstick;
     uint32_t keys_held;
     EditRepeatState edit_repeat;
     EditRepeatState navigation_repeat;
+    EditRepeatState playhead_repeat;
     uint32_t previous_circle_directions;
+    uint32_t previous_cstick_directions;
     int marker_x[MARKER_COUNT];
     int marker_ttl[MARKER_COUNT];
     int next_marker;
@@ -246,6 +253,34 @@ static void draw_peak_bar(int row, const char *label, uint16_t peak)
                           fill, height - 2.0f, black);
 }
 
+static void draw_input_peak_bar(int row, uint16_t peak)
+{
+    const float x = 2.0f * CELL_WIDTH;
+    const float y = (float)(row * CELL_HEIGHT + 1);
+    const float width = 21.0f * CELL_WIDTH;
+    const float height = 6.0f;
+    uint32_t black = C2D_Color32(0, 0, 0, 255);
+    draw_text(0, row, "IN", false);
+    C2D_DrawRectSolid(x, y, 0.2f, width, 1.0f, black);
+    C2D_DrawRectSolid(x, y + height - 1.0f, 0.2f, width, 1.0f, black);
+    C2D_DrawRectSolid(x, y, 0.2f, 1.0f, height, black);
+    C2D_DrawRectSolid(x + width - 1.0f, y, 0.2f, 1.0f, height, black);
+
+    float level = 0.0f;
+    if (peak > 0) {
+        double db = 20.0 * log10((double)peak / 32768.0);
+        level = (float)((db + 60.0) / 60.0);
+        if (level < 0.0f)
+            level = 0.0f;
+        if (level > 1.0f)
+            level = 1.0f;
+    }
+    float fill = (width - 2.0f) * level;
+    if (fill > 0.0f)
+        C2D_DrawRectSolid(x + 1.0f, y + 1.0f, 0.3f,
+                          fill, height - 2.0f, black);
+}
+
 static void format_output_peak(const AudioOutput *audio, char *text,
                                size_t size)
 {
@@ -289,6 +324,11 @@ static void format_parameter(const AppState *state, int index,
     case PARAM_GAIN:
         snprintf(text, size, "%+dDB", value);
         break;
+    case PARAM_MIC_GAIN: {
+        int tenths = 105 + value * 5;
+        snprintf(text, size, "%d.%dDB", tenths / 10, tenths % 10);
+        break;
+    }
     case PARAM_PAN:
         snprintf(text, size, "%+d%%", value);
         break;
@@ -383,7 +423,7 @@ static void draw_top_screen(const AppState *state, const AudioOutput *audio,
         draw_text(0, 25 + TOP_ROW_OFFSET, text, false);
     } else {
         draw_text(0, 20 + TOP_ROW_OFFSET, "BANK MISSING", false);
-        draw_text(0, 21 + TOP_ROW_OFFSET, bank->error, false);
+        draw_text(0, 25 + TOP_ROW_OFFSET, bank->error, false);
     }
 
     if (audio->ready) {
@@ -391,11 +431,8 @@ static void draw_top_screen(const AppState *state, const AudioOutput *audio,
                  audio_output_active_voices(audio),
                  parameters[PARAM_POLYPHONY].value);
         draw_text(0, 23 + TOP_ROW_OFFSET, text, false);
-        snprintf(text, sizeof(text), "BUF %08lX X%03lu L%03lu Z%03lu",
-                 (unsigned long)audio_output_buffers_submitted(audio),
-                 (unsigned long)audio_output_underruns(audio),
-                 (unsigned long)audio_output_late_refills(audio),
-                 (unsigned long)audio_output_silent_blocks(audio));
+        snprintf(text, sizeof(text), "BUF %08lX",
+                 (unsigned long)audio_output_buffers_submitted(audio));
         draw_text(0, 24 + TOP_ROW_OFFSET, text, false);
     } else {
         snprintf(text, sizeof(text), "ERR %08lX",
@@ -441,6 +478,8 @@ static void draw_top_screen(const AppState *state, const AudioOutput *audio,
     if (audio_output_clipping(audio))
         draw_text(44, 23 + TOP_ROW_OFFSET, "CLIP", true);
 
+    draw_input_peak_bar(26 + TOP_ROW_OFFSET,
+                        microphone_input_peak(microphone));
     draw_peak_bar(27 + TOP_ROW_OFFSET, "L", audio_output_peak_left(audio));
     draw_peak_bar(28 + TOP_ROW_OFFSET, "R", audio_output_peak_right(audio));
 }
@@ -529,6 +568,7 @@ static void reset_parameters(void)
     parameters[PARAM_PHASER_SPEED].value = 10;
     parameters[PARAM_HIGHPASS].value = 0;
     parameters[PARAM_LOWPASS].value = 8000;
+    parameters[PARAM_MIC_GAIN].value = MICROPHONE_INPUT_DEFAULT_GAIN;
 }
 
 static void add_marker(AppState *state, int x)
@@ -615,6 +655,15 @@ static void nudge_selected(AppState *state, int amount)
         parameter->value = parameter->minimum;
     if (parameter->value > parameter->maximum)
         parameter->value = parameter->maximum;
+}
+
+static void nudge_playhead(AppState *state, int amount)
+{
+    state->playhead_x += amount;
+    if (state->playhead_x < 0)
+        state->playhead_x = 0;
+    if (state->playhead_x >= BOTTOM_WIDTH)
+        state->playhead_x = BOTTOM_WIDTH - 1;
 }
 
 static uint32_t circle_navigation_directions(
@@ -823,6 +872,8 @@ int main(void)
     audio_output_init(&audio, &config, loaded_sample->samples,
                       loaded_sample->sample_count, loaded_sample->sample_rate);
     microphone_input_init(&microphone);
+    bool cstick_available = R_SUCCEEDED(irrstInit());
+    int applied_microphone_gain = MICROPHONE_INPUT_DEFAULT_GAIN;
 
     bool running = true;
     while (running && aptMainLoop()) {
@@ -831,6 +882,10 @@ int main(void)
         uint32_t up = hidKeysUp();
         state.keys_held = hidKeysHeld();
         hidCircleRead(&state.circle);
+        if (cstick_available) {
+            irrstScanInput();
+            hidCstickRead(&state.cstick);
+        }
         microphone_input_update(&microphone);
         bool recording = microphone_input_recording(&microphone);
         state.touch_active = !recording
@@ -886,16 +941,36 @@ int main(void)
         uint32_t circle_directions_down = circle_directions
                                         & ~state.previous_circle_directions;
         state.previous_circle_directions = circle_directions;
+        uint32_t cstick_directions = cstick_available
+            ? circle_navigation_directions(
+                &state.cstick, state.previous_cstick_directions)
+            : 0;
+        uint32_t cstick_directions_down = cstick_directions
+                                        & ~state.previous_cstick_directions;
+        state.previous_cstick_directions = cstick_directions;
+        uint32_t analog_directions = circle_directions | cstick_directions;
+        uint32_t analog_directions_down = circle_directions_down
+                                        | cstick_directions_down;
+        bool editing = (state.keys_held & KEY_B) != 0;
+        bool moving_playhead = !editing
+                            && (state.keys_held & KEY_Y) != 0;
         uint32_t edit_directions = edit_repeat_update(
             &state.edit_repeat,
-            !recording && (state.keys_held & KEY_B) != 0,
-            recording ? 0 : directions_down | circle_directions_down,
-            recording ? 0 : directions_held | circle_directions);
+            !recording && editing,
+            recording ? 0 : directions_down | analog_directions_down,
+            recording ? 0 : directions_held | analog_directions);
+        uint32_t playhead_directions = edit_repeat_update(
+            &state.playhead_repeat,
+            !recording && moving_playhead,
+            recording ? 0 : (directions_down | analog_directions_down)
+                              & (KEY_DLEFT | KEY_DRIGHT),
+            recording ? 0 : (directions_held | analog_directions)
+                              & (KEY_DLEFT | KEY_DRIGHT));
         uint32_t navigation_directions = edit_repeat_update(
             &state.navigation_repeat,
-            !recording && (state.keys_held & KEY_B) == 0,
-            recording ? 0 : directions_down | circle_directions_down,
-            recording ? 0 : directions_held | circle_directions);
+            !recording && !editing && !moving_playhead,
+            recording ? 0 : directions_down | analog_directions_down,
+            recording ? 0 : directions_held | analog_directions);
         if (edit_directions != 0) {
             Parameter *parameter = &parameters[state.selected_parameter];
             int previous_sample = parameters[PARAM_SAMPLE].value;
@@ -915,6 +990,10 @@ int main(void)
                                       parameters[PARAM_SAMPLE].value))
                 parameters[PARAM_SAMPLE].value = previous_sample;
             state.b_used = true;
+        } else if (playhead_directions != 0) {
+            int horizontal = ((playhead_directions & KEY_DRIGHT) ? 1 : 0)
+                           - ((playhead_directions & KEY_DLEFT) ? 1 : 0);
+            nudge_playhead(&state, horizontal);
         } else if (navigation_directions != 0) {
             int horizontal = ((navigation_directions & KEY_DRIGHT) ? 1 : 0)
                            - ((navigation_directions & KEY_DLEFT) ? 1 : 0);
@@ -933,6 +1012,16 @@ int main(void)
             parameters[PARAM_REVERB_FREEZE].value ^= 1;
         if (down & KEY_X)
             reset_parameters();
+        if (!recording && microphone_input_available(&microphone)
+                && parameters[PARAM_MIC_GAIN].value
+                    != applied_microphone_gain) {
+            if (microphone_input_set_gain(
+                    &microphone,
+                    (uint8_t)parameters[PARAM_MIC_GAIN].value))
+                applied_microphone_gain = parameters[PARAM_MIC_GAIN].value;
+            else
+                parameters[PARAM_MIC_GAIN].value = applied_microphone_gain;
+        }
 
         config = render_config(&state);
         if (recording)
@@ -955,6 +1044,8 @@ int main(void)
 
     audio_output_exit(&audio);
     microphone_input_exit(&microphone);
+    if (cstick_available)
+        irrstExit();
     ram_sample_free(&ram_sample);
     sample_library_free(&sample_library);
     sample_bank_close(&bank);
