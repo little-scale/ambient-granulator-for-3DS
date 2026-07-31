@@ -40,6 +40,14 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic \
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
     -I"$project_dir/include" \
+    "$project_dir/source/kiosk_mode.c" \
+    "$project_dir/tests/kiosk_mode_test.c" \
+    -o "$test_dir/kiosk_mode_test"
+
+"$test_dir/kiosk_mode_test"
+
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+    -I"$project_dir/include" \
     "$project_dir/source/effects_chain.c" \
     "$project_dir/tests/effects_chain_test.c" \
     -lm \

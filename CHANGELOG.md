@@ -3,6 +3,17 @@
 This project uses a decimal release sequence beginning with `v0.1` and
 increasing by `0.01`: `v0.11`, `v0.12`, `v0.13`, and so on.
 
+## [v0.12] - 2026-07-31
+
+### Added
+
+- An unattended kiosk mode that displays its status over the waveform and,
+  every random 30–60 seconds, changes to a different sample and pitch, primes
+  the reverb with the configured grain count, and freezes the new texture.
+- Permanent per-run kiosk cancellation on the first recognized button, touch,
+  Circle Pad, or C-stick input, including cancellation of an in-flight
+  automatic Freeze transition.
+
 ## [v0.11] - 2026-07-31
 
 ### Added
@@ -67,5 +78,6 @@ First public native Nintendo 3DS/2DS release.
 - DSP firmware setup is required for audio; follow the linked 3DS Hacks Guide.
 - Emulator microphone routing and timing differ from physical 2DS/3DS hardware.
 
+[v0.12]: https://github.com/little-scale/ambient-granulator-for-3DS/releases/tag/v0.12
 [v0.11]: https://github.com/little-scale/ambient-granulator-for-3DS/releases/tag/v0.11
 [v0.1]: https://github.com/little-scale/ambient-granulator-for-3DS/releases/tag/v0.1

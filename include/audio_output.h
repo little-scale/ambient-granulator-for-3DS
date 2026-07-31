@@ -53,6 +53,11 @@ void audio_output_update(AudioOutput *output,
 void audio_output_seed(AudioOutput *output, uint32_t seed);
 void audio_output_set_sample(AudioOutput *output, const int16_t *sample,
                              uint32_t sample_count, uint32_t sample_rate);
+void audio_output_start_burst(AudioOutput *output,
+                              const AudioRenderConfig *config,
+                              const int16_t *sample, uint32_t sample_count,
+                              uint32_t sample_rate, int center_x,
+                              int grain_count);
 void audio_output_stop_grains(AudioOutput *output);
 void audio_output_trigger(AudioOutput *output, int center_x,
                           int grain_count);

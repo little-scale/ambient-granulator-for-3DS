@@ -36,7 +36,7 @@ Homebrew Channel.
 
 ### 2. Download and install the application
 
-Download `ambient-granulator-for-3DS-v0.11-sd.zip` from the
+Download `ambient-granulator-for-3DS-v0.12-sd.zip` from the
 [latest release](https://github.com/little-scale/ambient-granulator-for-3DS/releases/latest).
 Extract it, then merge its `3ds` directory into the root of the console SD card.
 The finished layout is:
@@ -365,10 +365,18 @@ by this project.
 
 ## Granular controls
 
-At launch, the sampler chooses a random entry from the loaded bank, triggers
-the configured eight-grain burst, lets the complete burst excite the reverb,
-and then enables Freeze automatically. This produces a different held texture
-without requiring an initial button press.
+At launch, `KIOSK MODE` appears over the waveform. The sampler chooses a random
+entry from the loaded bank, triggers the configured eight-grain burst, lets the
+complete burst excite the reverb, and then enables Freeze automatically. While
+no human input has been recognized, kiosk mode waits a newly randomized 30–60
+seconds, loads a different random sample, turns Freeze off, chooses a different
+pitch from -12, -7, 0, +7 or +12 semitones, plays another configured burst, and
+freezes the resulting texture. This repeats indefinitely.
+
+The first recognized button press or release, touchscreen gesture, Circle Pad
+direction, or C-stick direction permanently ends kiosk mode for that run. Its
+label disappears immediately and any pending automatic Freeze action is
+cancelled. Kiosk mode cannot resume until the application is relaunched.
 
 - Touch/drag the lower waveform to set position and continuously repeat complete
   grain bursts. Releasing touch lets the current burst finish.

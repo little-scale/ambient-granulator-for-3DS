@@ -56,3 +56,17 @@ the rendered clock, FDN, phaser, filters, Freeze, meter, or NDSP queue. On
 release, the completed RAM layer becomes the grain source through the same
 memory-only source handoff used by bank selection. OSC networking and camera
 control are not connected yet.
+
+## Kiosk sequencing
+
+Kiosk mode is a platform-neutral control state layered above the granular
+engine. After each complete burst has launched and its active voices have
+finished, it enables Freeze and chooses a fresh random deadline 30–60 seconds
+in the future. At that deadline it atomically publishes an unfrozen effects
+configuration, switches to a different random resident sample, selects a
+different pitch from -12, -7, 0, +7 or +12 semitones, and triggers the configured
+grain count. This ordering prevents the audio thread from rendering a newly
+triggered grain against a stale frozen configuration.
+
+Any recognized button, touch, Circle Pad, or C-stick input cancels the kiosk
+state and its pending Freeze transition permanently for the current run.

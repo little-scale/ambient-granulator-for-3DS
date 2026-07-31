@@ -11,6 +11,7 @@
 #include "audio_output.h"
 #include "build_info.h"
 #include "edit_repeat.h"
+#include "kiosk_mode.h"
 #include "microphone_input.h"
 #include "ram_sample.h"
 #include "sample_bank.h"
@@ -152,8 +153,7 @@ static const uint8_t dot_glyph[7] = { 0, 0, 0, 0, 0, 12, 12 };
 typedef struct {
     int selected_parameter;
     int playhead_x;
-    bool startup_freeze_pending;
-    uint32_t startup_target_grains;
+    KioskMode kiosk;
     bool b_pressed;
     bool b_used;
     bool touch_active;
@@ -550,6 +550,8 @@ static void draw_bottom_screen(const AppState *state)
     }
     C2D_DrawRectSolid((float)state->playhead_x, 0.0f, 0.1f,
                       1.0f, SCREEN_HEIGHT, white);
+    if (state->kiosk.active)
+        draw_text(1, 1, "KIOSK MODE", true);
 }
 
 static void reset_parameters(void)
@@ -771,6 +773,36 @@ static bool select_sample(const SampleLibrary *library,
     return true;
 }
 
+static bool start_kiosk_cycle(const SampleLibrary *library,
+                              const LoadedSample **sample,
+                              AudioOutput *audio, AppState *state,
+                              uint64_t now_ms)
+{
+    int sample_index = kiosk_mode_choose_sample(
+        &state->kiosk, (int)library->sample_count,
+        parameters[PARAM_SAMPLE].value);
+    if (sample_index < 0
+            || !select_sample(library, sample, NULL, state, sample_index)) {
+        kiosk_mode_schedule(&state->kiosk, now_ms);
+        return false;
+    }
+
+    parameters[PARAM_SAMPLE].value = sample_index;
+    parameters[PARAM_PITCH].value = kiosk_mode_choose_pitch(
+        &state->kiosk, parameters[PARAM_PITCH].value);
+    parameters[PARAM_REVERB_FREEZE].value = 0;
+    AudioRenderConfig cycle_config = render_config(state);
+    cycle_config.granular.gate = false;
+    uint32_t grains_before = audio_output_grains_launched(audio);
+    audio_output_start_burst(
+        audio, &cycle_config, (*sample)->samples, (*sample)->sample_count,
+        (*sample)->sample_rate, state->playhead_x,
+        parameters[PARAM_GRAINS].value);
+    kiosk_mode_begin_burst(&state->kiosk, grains_before,
+                           parameters[PARAM_GRAINS].value);
+    return true;
+}
+
 static bool prepare_ram_recording(RamSample *ram_sample,
                                   const LoadedSample *current_sample,
                                   AppState *state)
@@ -843,6 +875,7 @@ int main(void)
     state.playhead_x = BOTTOM_WIDTH / 2;
     reset_parameters();
     uint32_t startup_seed = startup_random_seed();
+    kiosk_mode_init(&state.kiosk, startup_seed);
 
     gfxInitDefault();
     if (!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE)) {
@@ -872,8 +905,8 @@ int main(void)
         if (sample_library_load(&bank, BOTTOM_WIDTH, &sample_library)) {
             parameters[PARAM_SAMPLE].maximum
                 = (int)sample_library.sample_count - 1;
-            int startup_sample = (int)(startup_seed
-                % sample_library.sample_count);
+            int startup_sample = kiosk_mode_choose_sample(
+                &state.kiosk, (int)sample_library.sample_count, -1);
             parameters[PARAM_SAMPLE].value = startup_sample;
             select_sample(&sample_library, &loaded_sample, NULL, &state,
                           startup_sample);
@@ -892,12 +925,13 @@ int main(void)
                       loaded_sample->sample_count, loaded_sample->sample_rate);
     if (audio.ready && loaded_sample->samples != NULL) {
         audio_output_seed(&audio, startup_seed);
-        state.startup_target_grains = audio_output_grains_launched(&audio)
-            + (uint32_t)parameters[PARAM_GRAINS].value;
-        state.startup_freeze_pending = true;
+        uint32_t grains_before = audio_output_grains_launched(&audio);
         audio_output_trigger(&audio, state.playhead_x,
                              parameters[PARAM_GRAINS].value);
-    }
+        kiosk_mode_begin_burst(&state.kiosk, grains_before,
+                               parameters[PARAM_GRAINS].value);
+    } else
+        kiosk_mode_cancel(&state.kiosk);
     microphone_input_init(&microphone);
     bool cstick_available = R_SUCCEEDED(irrstInit());
     int applied_microphone_gain = MICROPHONE_INPUT_DEFAULT_GAIN;
@@ -978,6 +1012,10 @@ int main(void)
         uint32_t analog_directions = circle_directions | cstick_directions;
         uint32_t analog_directions_down = circle_directions_down
                                         | cstick_directions_down;
+        if (state.kiosk.active
+                && kiosk_mode_input_recognized(
+                    down, up, state.keys_held, analog_directions))
+            kiosk_mode_cancel(&state.kiosk);
         bool editing = (state.keys_held & KEY_B) != 0;
         bool moving_playhead = !editing
                             && (state.keys_held & KEY_Y) != 0;
@@ -1050,13 +1088,14 @@ int main(void)
                 parameters[PARAM_MIC_GAIN].value = applied_microphone_gain;
         }
 
-        if (state.startup_freeze_pending
-                && audio_output_grains_launched(&audio)
-                    >= state.startup_target_grains
-                && audio_output_active_voices(&audio) == 0) {
+        uint64_t now_ms = osGetTime();
+        if (kiosk_mode_complete_burst(
+                &state.kiosk, audio_output_grains_launched(&audio),
+                audio_output_active_voices(&audio), now_ms))
             parameters[PARAM_REVERB_FREEZE].value = 1;
-            state.startup_freeze_pending = false;
-        }
+        if (kiosk_mode_due(&state.kiosk, now_ms))
+            start_kiosk_cycle(&sample_library, &loaded_sample, &audio,
+                              &state, now_ms);
 
         config = render_config(&state);
         if (recording)

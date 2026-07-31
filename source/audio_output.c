@@ -226,6 +226,25 @@ void audio_output_set_sample(AudioOutput *output, const int16_t *sample,
     LightLock_Unlock(&output->state_lock);
 }
 
+void audio_output_start_burst(AudioOutput *output,
+                              const AudioRenderConfig *config,
+                              const int16_t *sample, uint32_t sample_count,
+                              uint32_t sample_rate, int center_x,
+                              int grain_count)
+{
+    if (!output->ready)
+        return;
+    LightLock_Lock(&output->config_lock);
+    LightLock_Lock(&output->state_lock);
+    output->config = *config;
+    granular_engine_set_sample(&output->engine, sample, sample_count,
+                               sample_rate);
+    granular_engine_trigger(&output->engine, center_x, grain_count);
+    publish_status(output);
+    LightLock_Unlock(&output->state_lock);
+    LightLock_Unlock(&output->config_lock);
+}
+
 void audio_output_stop_grains(AudioOutput *output)
 {
     if (!output->ready)
