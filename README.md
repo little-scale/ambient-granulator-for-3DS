@@ -36,7 +36,7 @@ Homebrew Channel.
 
 ### 2. Download and install the application
 
-Download `ambient-granulator-for-3DS-v0.1-sd.zip` from the
+Download `ambient-granulator-for-3DS-v0.11-sd.zip` from the
 [latest release](https://github.com/little-scale/ambient-granulator-for-3DS/releases/latest).
 Extract it, then merge its `3ds` directory into the root of the console SD card.
 The finished layout is:
@@ -99,9 +99,9 @@ Milestones 1–6 have an initial native baseline:
   while the audio worker renders, with control and DSP state synchronized by
   separate short-lived locks;
 - the DS-compatible `NDSGRN01` bank format with bounds and CRC validation;
-- all ten source samples embedded in an 11.62 MiB RomFS bank, with an optional
+- the source samples embedded in a self-contained RomFS bank, with an optional
   SD-card bank override;
-- all ten originals downmixed and converted with a cached 32-tap
+- all bundled originals downmixed and converted with a cached 32-tap
   windowed-sinc resampler to 48 kHz mono PCM16, then preloaded with their
   display waveforms before NDSP starts;
 - the actual loaded sample rendered as a min/max waveform;
@@ -220,7 +220,7 @@ value.
 ./scripts/verify-build.sh  # tests, build, 3DSX magic, ARM ELF, checksum
 ```
 
-The host tests retain the oscillator checks and also open the real ten-sample
+The host tests retain the oscillator checks and also open the real sample
 bank, validate its metadata and every sample CRC, analyze all waveforms, and
 cover sample silence, centered playback, hard-left panning, position, linear
 rate conversion, and timed trigger/release. A deterministic granular suite then
@@ -246,10 +246,13 @@ banks. The bundled bank is rebuilt from the original WAV files in the chosen
 order, downmixed to mono, converted to 48 kHz with a cached 32-tap
 Blackman-windowed sinc resampler, quantized to signed PCM16, and CRC-protected.
 
-The project owner has confirmed that every sample currently included in the
-bundled bank is non-copyrighted material and may be kept with the project
-source. This statement applies to the present bank only; users remain
-responsible for the rights to audio placed into replacement banks.
+The five source WAV files in [`samples/`](samples/) and their derived audio in
+the bundled bank are dedicated to the public domain under
+[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
+The complete dedication and legal code are included with the sample pack. CC0
+does not apply to the project's software, documentation, names, logos, or
+third-party components. Users remain responsible for the rights to audio placed
+into replacement banks.
 
 To reproduce the native bank from local source WAVs in `samples/`:
 
@@ -264,6 +267,9 @@ depth, duration, and non-audio RIFF chunks while setting its integer PCM sample
 peak to -1.0 dBFS. The bank builder then performs its normal mono downmix and
 48 kHz conversion, measures that final signal, and independently normalizes
 each bundled mono sample to -1.0 dBFS immediately before PCM16 quantization.
+It discovers every `.wav` file in `samples/` and orders them by filename using
+natural numeric sorting, so replacing the folder contents is enough to define
+the next embedded bank.
 The standalone browser patcher continues to preserve user-authored Gain values;
 automatic final normalization applies only to the reproducible bundled-bank
 script.
@@ -289,12 +295,11 @@ starts, then closes the bank file. Live selection therefore performs no SD or
 RomFS reads, no allocation, no CRC pass, and no full waveform scan: it only
 swaps a resident PCM pointer and copies 1.25 KiB of cached display data. This
 intentional departure from the DS one-sample policy prevents buffer starvation
-while preserving reverb state. The current ten-sample library uses about
-11.62 MiB of heap PCM. Bundled source PCM is signed 16-bit mono at 48 kHz, while
-legacy 16.384 kHz replacement banks remain supported. Each grain uses a
-source/output-rate-correct Q16 step and linear interpolation in the native
-48 kHz stereo NDSP stream. Runtime Pan and Pan Deviation spatialize the mono
-grain voices independently.
+while preserving reverb state. Bundled source PCM is signed 16-bit mono at
+48 kHz, while legacy 16.384 kHz replacement banks remain supported. Each grain
+uses a source/output-rate-correct Q16 step and linear interpolation in the
+native 48 kHz stereo NDSP stream. Runtime Pan and Pan Deviation spatialize the
+mono grain voices independently.
 
 ## Standalone browser sample-bank patcher
 
@@ -360,6 +365,11 @@ by this project.
 
 ## Granular controls
 
+At launch, the sampler chooses a random entry from the loaded bank, triggers
+the configured eight-grain burst, lets the complete burst excite the reverb,
+and then enables Freeze automatically. This produces a different held texture
+without requiring an initial button press.
+
 - Touch/drag the lower waveform to set position and continuously repeat complete
   grain bursts. Releasing touch lets the current burst finish.
 - Tap B to trigger one configured grain burst at the current position.
@@ -383,7 +393,7 @@ by this project.
 - The performance-oriented space defaults are REV 100%, Feedback 90.0%, Size
   100%, and Damp 5%; X restores these values along with the other defaults.
 - BPM defaults to 96 and Pan Deviation defaults to 100%.
-- Edit Sample with B + D-pad to load any of the ten bank entries and redraw
+- Edit Sample with B + D-pad to load any bank entry and redraw
   the waveform.
 - Hold R to record from the console microphone. Recording begins at the current
   waveform position and stops when R is released, or automatically at four

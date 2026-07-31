@@ -6,6 +6,7 @@ version="$(tr -d '[:space:]' < "$project_dir/VERSION")"
 release_dir="$project_dir/dist/release/v$version"
 binary_name="ambient-granulator-for-3DS-v$version.3dsx"
 zip_name="ambient-granulator-for-3DS-v$version-sd.zip"
+samples_zip_name="ambient-granulator-for-3DS-v$version-cc0-samples.zip"
 
 if [[ -n "$(git -C "$project_dir" status --porcelain)" ]]; then
     echo "Release builds require a clean committed worktree." >&2
@@ -32,9 +33,18 @@ cp "$project_dir/3ds_granulator.3dsx" "$release_dir/$binary_name"
 )
 mv "$staging/$zip_name" "$release_dir/$zip_name"
 
+mkdir -p "$staging/samples"
+cp "$project_dir/samples/LICENSE" "$project_dir/samples/README.md" \
+   "$project_dir/samples/"*.wav "$staging/samples/"
+(
+    cd "$staging"
+    zip -qr "$staging/$samples_zip_name" samples
+)
+mv "$staging/$samples_zip_name" "$release_dir/$samples_zip_name"
+
 (
     cd "$release_dir"
-    shasum -a 256 "$binary_name" "$zip_name"
+    shasum -a 256 "$binary_name" "$zip_name" "$samples_zip_name"
 ) > "$staging/SHA256SUMS.txt"
 mv "$staging/SHA256SUMS.txt" "$release_dir/SHA256SUMS.txt"
 

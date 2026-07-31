@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,18 +18,14 @@ const repository = resolve(patcherDirectory, "..");
 const sourceDirectory = resolve(process.argv[2] ?? resolve(repository, "samples"));
 const outputFile = resolve(process.argv[3]
   ?? resolve(repository, "romfs/sample_bank.bin"));
-const order = [
-  "1.wav",
-  "2.wav",
-  "3.wav",
-  "4.wav",
-  "5.wav",
-  "6.wav",
-  "110bpm F - 01 - Hiskee Vocalpack.wav",
-  "130bpm Am - 05 - Hiskee Vocalpack.wav",
-  "sample1.wav",
-  "piano.wav",
-];
+const order = (await readdir(sourceDirectory))
+  .filter(filename => filename.toLowerCase().endsWith(".wav"))
+  .sort((left, right) => left.localeCompare(right, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  }));
+if (!order.length)
+  throw new Error(`No WAV samples found in ${sourceDirectory}.`);
 const TARGET_PEAK_DBFS = -1.0;
 const TARGET_PEAK = 10 ** (TARGET_PEAK_DBFS / 20);
 

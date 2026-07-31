@@ -70,14 +70,12 @@ static void test_bank_and_waveform(const char *path, SampleBank *bank,
                                    LoadedSample *sample)
 {
     assert(sample_bank_open(bank, path));
-    assert(bank->sample_count == 10);
+    assert(bank->sample_count > 0);
     assert(bank->sample_rate == 16384 || bank->sample_rate == 48000);
-    assert(strcmp(bank->entries[0].name, "1") == 0);
-    assert(strcmp(bank->entries[9].name, "piano") == 0);
     assert(sample_bank_load(bank, 0, sample));
     assert(sample->sample_count > 1000);
     assert(sample->sample_rate == bank->sample_rate);
-    assert(strcmp(sample->name, "1") == 0);
+    assert(strcmp(sample->name, bank->entries[0].name) == 0);
 
     waveform_analyze(sample->samples, sample->sample_count,
                      minimum, maximum, WAVEFORM_COLUMNS);

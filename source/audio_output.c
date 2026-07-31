@@ -205,6 +205,15 @@ void audio_output_update(AudioOutput *output,
     LightLock_Unlock(&output->config_lock);
 }
 
+void audio_output_seed(AudioOutput *output, uint32_t seed)
+{
+    if (!output->ready)
+        return;
+    LightLock_Lock(&output->state_lock);
+    granular_engine_seed(&output->engine, seed);
+    LightLock_Unlock(&output->state_lock);
+}
+
 void audio_output_set_sample(AudioOutput *output, const int16_t *sample,
                              uint32_t sample_count, uint32_t sample_rate)
 {

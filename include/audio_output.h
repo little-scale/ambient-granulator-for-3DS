@@ -50,6 +50,7 @@ bool audio_output_init(AudioOutput *output,
                        uint32_t sample_rate);
 void audio_output_update(AudioOutput *output,
                          const AudioRenderConfig *config);
+void audio_output_seed(AudioOutput *output, uint32_t seed);
 void audio_output_set_sample(AudioOutput *output, const int16_t *sample,
                              uint32_t sample_count, uint32_t sample_rate);
 void audio_output_stop_grains(AudioOutput *output);

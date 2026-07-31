@@ -49,5 +49,6 @@ local `samples/` directory:
 npm run bank
 ```
 
-The source WAVs stay local by default; the generated, rights-cleared
-`romfs/sample_bank.bin` is the distributable app asset.
+The repository includes the five source WAVs under CC0 1.0 Universal; see
+`samples/README.md` and `samples/LICENSE`. The generated
+`romfs/sample_bank.bin` embeds their derived 48 kHz mono PCM16 audio.

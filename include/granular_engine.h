@@ -87,6 +87,7 @@ uint32_t granular_pitch_step_fine_q16(uint32_t source_rate, int output_rate,
                                       int semitones, int cents);
 
 void granular_engine_init(GranularEngine *engine);
+void granular_engine_seed(GranularEngine *engine, uint32_t seed);
 void granular_engine_set_sample(GranularEngine *engine,
                                 const int16_t *sample,
                                 uint32_t sample_count,

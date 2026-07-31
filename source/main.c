@@ -152,6 +152,8 @@ static const uint8_t dot_glyph[7] = { 0, 0, 0, 0, 0, 12, 12 };
 typedef struct {
     int selected_parameter;
     int playhead_x;
+    bool startup_freeze_pending;
+    uint32_t startup_target_grains;
     bool b_pressed;
     bool b_used;
     bool touch_active;
@@ -172,6 +174,18 @@ typedef struct {
     int marker_ttl[MARKER_COUNT];
     int next_marker;
 } AppState;
+
+static uint32_t startup_random_seed(void)
+{
+    uint64_t value = osGetTime();
+    value ^= value >> 30;
+    value *= UINT64_C(0xBF58476D1CE4E5B9);
+    value ^= value >> 27;
+    value *= UINT64_C(0x94D049BB133111EB);
+    value ^= value >> 31;
+    uint32_t seed = (uint32_t)(value ^ (value >> 32));
+    return seed != 0 ? seed : UINT32_C(0x6D2B79F5);
+}
 
 static const uint8_t *font_glyph(char character)
 {
@@ -828,6 +842,7 @@ int main(void)
     memset(&microphone, 0, sizeof(microphone));
     state.playhead_x = BOTTOM_WIDTH / 2;
     reset_parameters();
+    uint32_t startup_seed = startup_random_seed();
 
     gfxInitDefault();
     if (!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE)) {
@@ -857,7 +872,11 @@ int main(void)
         if (sample_library_load(&bank, BOTTOM_WIDTH, &sample_library)) {
             parameters[PARAM_SAMPLE].maximum
                 = (int)sample_library.sample_count - 1;
-            select_sample(&sample_library, &loaded_sample, NULL, &state, 0);
+            int startup_sample = (int)(startup_seed
+                % sample_library.sample_count);
+            parameters[PARAM_SAMPLE].value = startup_sample;
+            select_sample(&sample_library, &loaded_sample, NULL, &state,
+                          startup_sample);
         } else {
             snprintf(bank.error, sizeof(bank.error), "PRELOAD FAILED");
         }
@@ -871,6 +890,14 @@ int main(void)
     AudioOutput audio;
     audio_output_init(&audio, &config, loaded_sample->samples,
                       loaded_sample->sample_count, loaded_sample->sample_rate);
+    if (audio.ready && loaded_sample->samples != NULL) {
+        audio_output_seed(&audio, startup_seed);
+        state.startup_target_grains = audio_output_grains_launched(&audio)
+            + (uint32_t)parameters[PARAM_GRAINS].value;
+        state.startup_freeze_pending = true;
+        audio_output_trigger(&audio, state.playhead_x,
+                             parameters[PARAM_GRAINS].value);
+    }
     microphone_input_init(&microphone);
     bool cstick_available = R_SUCCEEDED(irrstInit());
     int applied_microphone_gain = MICROPHONE_INPUT_DEFAULT_GAIN;
@@ -1021,6 +1048,14 @@ int main(void)
                 applied_microphone_gain = parameters[PARAM_MIC_GAIN].value;
             else
                 parameters[PARAM_MIC_GAIN].value = applied_microphone_gain;
+        }
+
+        if (state.startup_freeze_pending
+                && audio_output_grains_launched(&audio)
+                    >= state.startup_target_grains
+                && audio_output_active_voices(&audio) == 0) {
+            parameters[PARAM_REVERB_FREEZE].value = 1;
+            state.startup_freeze_pending = false;
         }
 
         config = render_config(&state);

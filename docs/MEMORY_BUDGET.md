@@ -5,8 +5,8 @@ budget. Measurements for the current native ELF and bank are:
 
 - loaded ARM code and read-only data: approximately 155 KiB;
 - static writable/TLS/BSS data: approximately 37 KiB;
-- resident ten-sample PCM library: approximately 11.62 MiB;
-- cached min/max waveforms for all ten samples: 12.5 KiB;
+- resident five-sample PCM library: approximately 8.93 MiB;
+- cached min/max waveforms for all five samples: 6.25 KiB;
 - NDSP stream buffers: 8 KiB;
 - signed 32-bit grain/effects scratch buffer: 4 KiB;
 - expanded four-line FDN storage: 187.5 KiB;
@@ -16,19 +16,19 @@ budget. Measurements for the current native ELF and bank are:
 - microphone service ring: 64 KiB;
 - four-second signed PCM16 microphone capture: approximately 255.7 KiB;
 - destructive-punch RAM layer: one additional copy of the active sample,
-  currently at most approximately 1.65 MiB for the bundled bank;
-- compact embedded RomFS bank: approximately 11.62 MiB on the `.3dsx` image.
+  currently at most approximately 2.20 MiB for the bundled bank;
+- compact embedded RomFS bank: approximately 8.93 MiB on the `.3dsx` image.
 
-Counting both the embedded 11.62 MiB RomFS bank image and its preloaded PCM copy
+Counting both the embedded 8.93 MiB RomFS bank image and its preloaded PCM copy
 pessimistically as resident, the project's explicit allocations remain below
-24 MiB before Citro2D, libctru, emulator/system services, stacks and allocator
-overhead. Activating microphone punch-in raises the current bundled-bank peak by
-approximately 1.97 MiB. The expanded FDN adds 150 KiB over the original native
-allocation.
+19 MiB before Citro2D, libctru, emulator/system services, stacks and allocator
+overhead. Microphone capture and the maximum current destructive-punch RAM
+layer raise that figure to about 21.5 MiB. The expanded FDN adds 150 KiB over
+the original native allocation.
 
 All current samples are loaded and CRC-checked before NDSP starts, and all
 waveforms are analyzed at the same time. The bank file is then closed. This
-uses roughly 9.6 MiB more heap than the former largest-sample-only policy, but
+uses roughly 6.73 MiB more heap than the former largest-sample-only policy, but
 removes file I/O, allocation, CRC work, and full waveform analysis from the
 live sample-switch path. That trade is intentional: uninterrupted reverb and
 NDSP buffer submission are instrument-critical.

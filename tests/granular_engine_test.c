@@ -74,6 +74,16 @@ static void test_contract_math(void)
         && fine_down <= semitone_down + 1);
 }
 
+static void test_random_seed(void)
+{
+    GranularEngine engine;
+    granular_engine_init(&engine);
+    granular_engine_seed(&engine, UINT32_C(0x12345678));
+    assert(engine.random_state == UINT32_C(0x12345678));
+    granular_engine_seed(&engine, 0);
+    assert(engine.random_state == UINT32_C(0x6D2B79F5));
+}
+
 static void test_fine_tuning(void)
 {
     GranularEngine engine;
@@ -393,6 +403,7 @@ int main(void)
         sample[index] = (int16_t)(12000 + (index & 255));
     memset(output, 0, sizeof(output));
     test_contract_math();
+    test_random_seed();
     test_fine_tuning();
     test_sample_clock_burst();
     test_sync_and_gate_repetition();

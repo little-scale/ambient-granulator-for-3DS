@@ -318,6 +318,11 @@ void granular_engine_init(GranularEngine *engine)
     engine->random_state = UINT32_C(0x6D2B79F5);
 }
 
+void granular_engine_seed(GranularEngine *engine, uint32_t seed)
+{
+    engine->random_state = seed != 0 ? seed : UINT32_C(0x6D2B79F5);
+}
+
 void granular_engine_set_sample(GranularEngine *engine,
                                 const int16_t *sample,
                                 uint32_t sample_count,

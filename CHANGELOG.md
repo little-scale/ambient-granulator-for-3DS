@@ -3,6 +3,25 @@
 This project uses a decimal release sequence beginning with `v0.1` and
 increasing by `0.01`: `v0.11`, `v0.12`, `v0.13`, and so on.
 
+## [v0.11] - 2026-07-31
+
+### Added
+
+- Random sample selection on launch, followed by an automatic priming burst
+  (eight grains by default) and Freeze activation once the complete burst has
+  entered the reverb.
+- The five current source piano WAVs in the repository and release sample pack,
+  dedicated to the public domain under CC0 1.0 Universal.
+
+### Changed
+
+- Replaced the previous ten-sample embedded bank with the five current local
+  piano samples at 48 kHz mono PCM16.
+- Made the native bank builder discover and naturally sort the WAV files in
+  `samples/` instead of relying on the previous hard-coded filenames.
+- Made sample-bank tests accept the current reproducible bank contents rather
+  than the retired ten-sample fixture.
+
 ## [v0.1] - 2026-07-14
 
 First public native Nintendo 3DS/2DS release.
@@ -48,4 +67,5 @@ First public native Nintendo 3DS/2DS release.
 - DSP firmware setup is required for audio; follow the linked 3DS Hacks Guide.
 - Emulator microphone routing and timing differ from physical 2DS/3DS hardware.
 
+[v0.11]: https://github.com/little-scale/ambient-granulator-for-3DS/releases/tag/v0.11
 [v0.1]: https://github.com/little-scale/ambient-granulator-for-3DS/releases/tag/v0.1
